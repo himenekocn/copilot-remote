@@ -406,14 +406,9 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		});
 		try {
 			const attachFiles = await this._materializeAttachments(requestId, latestUserMessage?.attachments || []);
-			if (participant) {
-				await vscode.commands.executeCommand('workbench.action.chat.toggleAgentMode', {
-					modeId: participant,
-					sessionResource: activeSessionUri,
-				});
-			}
 			await vscode.commands.executeCommand('workbench.action.chat.open', {
 				query: prompt,
+				mode: participant,
 				modelSelector: modelId ? { id: modelId } : undefined,
 				attachFiles,
 			});

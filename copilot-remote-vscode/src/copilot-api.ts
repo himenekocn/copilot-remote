@@ -1040,17 +1040,15 @@ export class CopilotApi {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       let fullPrompt = '';
-      if (participant) {
-        await vscode.commands.executeCommand('workbench.action.chat.toggleAgentMode', {
-          modeId: participant,
-        });
-      }
       if (command) {
         fullPrompt += `/${command} `;
       }
       fullPrompt += prompt;
 
-      await vscode.commands.executeCommand('workbench.action.chat.open', fullPrompt);
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: fullPrompt,
+        mode: participant,
+      });
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
