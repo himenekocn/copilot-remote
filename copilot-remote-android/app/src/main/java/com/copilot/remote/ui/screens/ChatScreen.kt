@@ -1,12 +1,14 @@
 package com.copilot.remote.ui.screens
 
 import android.net.Uri
+import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,6 +19,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +47,7 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     var showTools by remember { mutableStateOf(false) }
     var showSessions by remember { mutableStateOf(false) }
     var showTerminals by remember { mutableStateOf(false) }
+    var previewAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
     val attach: (Uri) -> Unit = { uri ->
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -109,8 +115,11 @@ fun ChatScreen(viewModel: CopilotViewModel) {
                 }
             }
         }
-        if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            attachments.forEachIndexed { index, item -> TextButton("${item.name} ×", { attachments = attachments.filterIndexed { i, _ -> i != index } }) }
+        if (attachments.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(attachments.size) { index ->
+                val item = attachments[index]
+                AttachmentThumbnail(item, onPreview = { previewAttachment = item }, onRemove = { attachments = attachments.filterIndexed { i, _ -> i != index } })
+            }
         }
         val slashQuery = input.takeIf { it.startsWith("/") && !it.contains(Regex("\\s")) }?.drop(1)
         val slashMatches = if (slashQuery == null) emptyList() else state.slashCommands.filter { it.name.contains(slashQuery, ignoreCase = true) }.take(8)
@@ -153,6 +162,12 @@ fun ChatScreen(viewModel: CopilotViewModel) {
                 ) {
                     Icon(Icons.Default.Add, "添加图片", modifier = Modifier.size(21.dp))
                 }
+                IconButton(
+                    onClick = viewModel::captureWindowForChat,
+                    enabled = !state.isSending,
+                    modifier = Modifier.size(44.dp),
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                ) { Icon(Icons.Default.PhotoCamera, "截取 VS Code 窗口", modifier = Modifier.size(20.dp)) }
                 IconButton(
                     onClick = { viewModel.refreshTerminals(); showTerminals = true },
                     enabled = !state.isSending,
@@ -256,6 +271,34 @@ fun ChatScreen(viewModel: CopilotViewModel) {
             items(state.nativeChatSessions, key = { it.id }) { session -> BasicComponent(title = session.title.takeUnless { it.isBlank() || it == session.id || it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: "未命名对话", summary = session.workspaceName ?: session.source, onClick = { viewModel.selectNativeChatSession(session.id); showSessions = false }) }
         }
     }
+    previewAttachment?.let { attachment ->
+        SuperDialog(show = true, title = attachment.name, onDismissRequest = { previewAttachment = null }) {
+            AttachmentImage(attachment, Modifier.fillMaxWidth().heightIn(max = 620.dp), ContentScale.Fit)
+        }
+    }
+}
+
+@Composable
+private fun AttachmentThumbnail(attachment: ChatAttachment, onPreview: () -> Unit, onRemove: () -> Unit) {
+    if (!attachment.mimeType.startsWith("image/")) {
+        TextButton("${attachment.name} ×", onClick = onRemove)
+        return
+    }
+    Box(Modifier.size(76.dp).clip(RoundedCornerShape(14.dp))) {
+        AttachmentImage(attachment, Modifier.fillMaxSize().clickable(onClick = onPreview), ContentScale.Crop)
+        IconButton(onClick = onRemove, modifier = Modifier.align(Alignment.TopEnd).size(28.dp), backgroundColor = MiuixTheme.colorScheme.surface.copy(alpha = .82f)) {
+            Icon(Icons.Default.Close, "移除图片", modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun AttachmentImage(attachment: ChatAttachment, modifier: Modifier, contentScale: ContentScale) {
+    val bitmap = remember(attachment.dataBase64) {
+        runCatching { Base64.decode(attachment.dataBase64, Base64.DEFAULT) }.getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
+    }
+    if (bitmap != null) androidx.compose.foundation.Image(bitmap, attachment.name, modifier, contentScale = contentScale)
+    else Box(modifier, contentAlignment = Alignment.Center) { Icon(Icons.Default.BrokenImage, "图片无法显示") }
 }
 
 @Composable

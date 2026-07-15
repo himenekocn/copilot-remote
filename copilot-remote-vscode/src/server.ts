@@ -562,9 +562,8 @@ export class CopilotRemoteServer {
         catch (err) { this.send(ws, { type: 'replaceResult', filesChanged: 0, replacements: 0, error: err instanceof Error ? err.message : String(err) }); }
         break;
       case 'captureWindow':
-      case 'recordWindow':
         try {
-          const result = await this.copilotApi.captureWindow(message.type === 'recordWindow' ? message.seconds : 0, message.type === 'recordWindow' ? message.fps : 1);
+          const result = await this.copilotApi.captureWindow(0, 1);
           this.send(ws, { type: 'windowCapture', ...result });
         } catch (err) { this.send(ws, { type: 'windowCapture', frames: [], intervalMs: 0, error: err instanceof Error ? err.message : String(err) }); }
         break;

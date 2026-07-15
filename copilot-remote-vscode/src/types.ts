@@ -294,7 +294,6 @@ export type ClientMessage =
   | { type: 'setEditorSelection'; filePath: string; startLine: number; startCharacter?: number; endLine?: number; endCharacter?: number }
   | { type: 'replaceInFiles'; query: string; replacement: string; include?: string }
   | { type: 'captureWindow' }
-  | { type: 'recordWindow'; seconds?: number; fps?: number }
   | { type: 'listInstances' }
   | { type: 'proxy'; targetInstanceId: string; message: Omit<ClientMessage, 'type'> & { type: string } }
   | { type: 'ping' };

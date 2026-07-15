@@ -497,6 +497,9 @@ class CopilotViewModel(
             "pushTokenUnregistered" -> Unit
             "windowCapture" -> updateConnection(profileId) { conn ->
                 val frames = json.optJSONArray("frames") ?: JSONArray()
+                frames.optString(0).takeIf(String::isNotBlank)?.let { frame ->
+                    _uiState.update { it.copy(pendingCaptureAttachment = ChatAttachment("vscode-capture.png", "image/png", frame)) }
+                }
                 conn.copy(captureFrames = (0 until frames.length()).map { frames.optString(it) }, captureIntervalMs = json.optInt("intervalMs"), errorMessage = json.optString("error").takeIf(String::isNotBlank))
             }
 
@@ -1656,8 +1659,7 @@ class CopilotViewModel(
         if (profileId.isNotBlank()) sendViaConnection(profileId, buildJsonCommand("registerPushToken") { put("token", token) })
     }
     fun updatePushStatus(status: String) { _uiState.update { it.copy(pushStatus = status) } }
-    fun captureWindow() = sendViaActiveConnection(buildJsonCommand("captureWindow") {})
-    fun recordWindow() = sendViaActiveConnection(buildJsonCommand("recordWindow") { put("seconds", 5); put("fps", 2) })
+    fun captureWindowForChat() = sendViaActiveConnection(buildJsonCommand("captureWindow") {})
     fun refreshWorkspace() = refreshCommand("getWorkspaceInfo", "workspaceInfo", "工作区信息已刷新")
     fun refreshStatus() = refreshCommand("getStatus", "status", "服务器状态已刷新")
     fun refreshHistory() = refreshCommand("getChatHistory", "chatHistory", "对话记录已刷新")
