@@ -1564,7 +1564,7 @@ class CopilotViewModel(
     fun closeFile(path: String) = sendViaActiveConnection(buildJsonCommand("closeFile") { put("filePath", path) })
 
     fun refreshGit() = refreshActive { profileId ->
-        sendWithFeedback(profileId, buildJsonCommand("getGitStatus") {}, "gitStatus", "Git 状态已刷新")
+        sendViaConnection(profileId, buildJsonCommand("getGitStatus") {})
         sendViaConnection(profileId, buildJsonCommand("getGitHistory") {})
         sendViaConnection(profileId, buildJsonCommand("listPullRequests") {})
     }
@@ -1617,7 +1617,6 @@ class CopilotViewModel(
     private fun sendWithFeedback(profileId: String, message: JSONObject, responseType: String, successMessage: String): Boolean {
         val instanceId = _connections.value[profileId]?.activeInstanceId.orEmpty()
         pendingFeedbacks[feedbackKey(profileId, instanceId, responseType)] = successMessage
-        showNotice("正在刷新…")
         val sent = sendViaConnection(profileId, message)
         if (!sent) {
             pendingFeedbacks.remove(feedbackKey(profileId, instanceId, responseType))

@@ -1274,9 +1274,15 @@ export class CopilotApi {
 
   private async githubRequest<T>(apiPath: string, method = 'GET', body?: unknown): Promise<T> {
     const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: false });
-    if (!session) throw new Error('Sign in to GitHub in VS Code first');
+    if (!session && method !== 'GET') throw new Error('Sign in to GitHub in VS Code before changing pull requests');
+    const headers: Record<string, string> = {
+      accept: 'application/vnd.github+json',
+      'user-agent': 'copilot-remote',
+      'content-type': 'application/json',
+    };
+    if (session) headers.authorization = `Bearer ${session.accessToken}`;
     return new Promise<T>((resolve, reject) => {
-      const req = https.request({ hostname: 'api.github.com', path: apiPath, method, headers: { authorization: `Bearer ${session.accessToken}`, accept: 'application/vnd.github+json', 'user-agent': 'copilot-remote', 'content-type': 'application/json' } }, res => {
+      const req = https.request({ hostname: 'api.github.com', path: apiPath, method, headers }, res => {
         const chunks: Buffer[] = [];
         res.on('data', chunk => chunks.push(Buffer.from(chunk)));
         res.on('end', () => { const text = Buffer.concat(chunks).toString('utf8'); if ((res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300) resolve(JSON.parse(text) as T); else reject(new Error(`GitHub HTTP ${res.statusCode}: ${text.slice(0, 300)}`)); });
