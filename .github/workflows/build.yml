@@ -36,12 +36,13 @@ jobs:
           npx --yes @vscode/vsce package --out copilot-remote.vsix
 
       - name: Restore Android signing key
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         working-directory: copilot-remote-android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.jks
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.jks
+          fi
 
       - name: Build Android release
         working-directory: copilot-remote-android
