@@ -117,11 +117,8 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                     Text("正在读取会话记录…", color = MiuixTheme.colorScheme.onSurfaceSecondary)
                 }
             } else if (state.chatMessages.isEmpty()) item { EmptyConversation() }
-            items(groupTimelineMessages(state.chatMessages), key = { it.key }) { item ->
-                when (item) {
-                    is ChatTimelineItem.Message -> MessageCard(item.message) { viewModel.retryMessage(item.message.id) }
-                    is ChatTimelineItem.Process -> ProcessMessageGroup(item.messages)
-                }
+            items(state.chatMessages, key = { it.id }) { message ->
+                MessageCard(message) { viewModel.retryMessage(message.id) }
             }
         }
         if (attachments.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -361,39 +358,6 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit) {
             }
         }
     }
-}
-
-private sealed interface ChatTimelineItem {
-    val key: String
-
-    data class Message(val message: ChatMessage) : ChatTimelineItem {
-        override val key = message.id
-    }
-
-    data class Process(val messages: List<ChatMessage>) : ChatTimelineItem {
-        override val key = "process:${messages.first().id}"
-    }
-}
-
-private fun groupTimelineMessages(messages: List<ChatMessage>): List<ChatTimelineItem> {
-    val result = mutableListOf<ChatTimelineItem>()
-    var process = mutableListOf<ChatMessage>()
-    fun flushProcess() {
-        if (process.isNotEmpty()) {
-            result += ChatTimelineItem.Process(process.toList())
-            process = mutableListOf()
-        }
-    }
-    messages.forEach { message ->
-        if (message.kind == "thinking" || message.kind == "tool") {
-            process += message
-        } else {
-            flushProcess()
-            result += ChatTimelineItem.Message(message)
-        }
-    }
-    flushProcess()
-    return result
 }
 
 @Composable

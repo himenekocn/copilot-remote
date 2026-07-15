@@ -770,6 +770,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 			const response = Array.isArray(request.response) ? request.response : [];
 			let textBuffer = '';
 			let partIndex = 0;
+			const progressSeen = new Set<string>();
 			const flushText = () => {
 				const content = textBuffer.trim();
 				if (content) messages.push({ id: `${requestId}:assistant:${partIndex++}`, role: 'assistant', content, timestamp: timestamp + partIndex, modelId, kind: 'message' });
@@ -779,14 +780,18 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 				if (!rawPart || typeof rawPart !== 'object') continue;
 				const part = rawPart as Record<string, any>;
 				const kind = typeof part.kind === 'string' ? part.kind : '';
+				const normalizedKind = kind.toLowerCase();
 				const value = this._sessionPartText(part.value);
 				if (kind === 'thinking') {
 					flushText();
 					if (value) messages.push({ id: `${requestId}:thinking:${partIndex++}`, role: 'assistant', content: value, timestamp: timestamp + partIndex, modelId, kind: 'thinking' });
-				} else if (kind === 'progressTaskSerialized') {
+				} else if (kind === 'progressTaskSerialized' || normalizedKind.includes('progress')) {
 					flushText();
-					const content = this._sessionPartText(part.content);
-					if (content) messages.push({ id: `${requestId}:progress:${partIndex++}`, role: 'assistant', content, timestamp: timestamp + partIndex, modelId, kind: 'thinking' });
+					const content = this._sessionPartText(part.content) || value;
+					if (content && !this._isInternalChatNoise(content) && !progressSeen.has(content)) {
+						progressSeen.add(content);
+						messages.push({ id: `${requestId}:progress:${partIndex++}`, role: 'assistant', content, timestamp: timestamp + partIndex, modelId, kind: 'thinking' });
+					}
 				} else if (kind === 'textEditGroup') {
 					flushText();
 					const filePath = String(part.uri?.fsPath ?? part.uri?.path ?? '');
@@ -808,8 +813,9 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 					const todos = Array.isArray(part.todoList) ? part.todoList as Array<Record<string, unknown>> : [];
 					const output = todos.map(todo => `[${todo.status === 'completed' ? 'x' : todo.status === 'in-progress' ? '>' : ' '}] ${String(todo.title ?? '')}`).join('\n');
 					messages.push({ id: `${requestId}:todos:${partIndex++}`, role: 'assistant', content: '更新任务列表', timestamp: timestamp + partIndex, modelId, kind: 'tool', toolName: '任务列表', toolStatus: 'completed', toolOutput: output });
-				} else if (kind.toLowerCase().includes('tool')) {
+				} else if (normalizedKind.includes('tool')) {
 					flushText();
+					const toolPartIndex = partIndex++;
 					const data = (part.toolSpecificData ?? part.value?.toolSpecificData ?? part.value ?? {}) as Record<string, unknown>;
 					const toolName = String(part.toolName ?? data.toolName ?? part.toolId ?? part.name ?? 'Tool');
 					const toolOutput = this._sessionToolText(data.output ?? data.result ?? part.output);
@@ -818,11 +824,17 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 					const failed = part.isError === true || data.isError === true;
 					const content = this._sessionPartText(part.pastTenseMessage ?? part.invocationMessage) || value || toolOutput || toolName;
 					messages.push({
-						id: `${requestId}:tool:${String(part.toolCallId ?? data.toolCallId ?? partIndex++)}`,
+						id: `${requestId}:tool:${String(part.toolCallId ?? data.toolCallId ?? toolPartIndex)}`,
 						role: 'assistant', content, timestamp: timestamp + partIndex, modelId, kind: 'tool', toolName,
 						toolStatus: failed ? 'error' : complete ? 'completed' : 'running', toolInput, toolOutput,
 					});
-				} else if (value) {
+				} else if (normalizedKind.includes('reference') || normalizedKind.includes('anchor') || normalizedKind.includes('citation')) {
+					const target = part.value2 ?? part.value?.value ?? part.value;
+					const uri = this._uriText(target);
+					const label = String(part.title ?? part.value?.variableName ?? this._uriLabel(target) ?? uri ?? '引用');
+					const snippet = typeof part.snippet === 'string' && part.snippet ? `\n\n\`\`\`\n${part.snippet}\n\`\`\`` : '';
+					textBuffer += uri ? `\n\n> 引用：[${this._escapeMarkdown(label)}](${uri})${snippet}\n` : `\n\n> 引用：${label}${snippet}\n`;
+				} else if (value && !this._isInternalChatNoise(value) && (!kind || normalizedKind.includes('markdown') || normalizedKind === 'text')) {
 					textBuffer += value;
 				}
 			}
@@ -850,6 +862,35 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		const text = this._sessionPartText(value);
 		if (text) return text.slice(0, 20_000);
 		try { return JSON.stringify(value, null, 2).slice(0, 20_000); } catch { return String(value).slice(0, 20_000); }
+	}
+
+	private _isInternalChatNoise(value: string): boolean {
+		return /ENOENT[^\n]*o200k_base\.tiktoken|github\.copilot-chat-[^\s\\/]+[\\/]dist[\\/]o200k_base\.tiktoken/i.test(value);
+	}
+
+	private _uriText(value: any): string | undefined {
+		const target = value?.uri ?? value;
+		if (!target) return undefined;
+		if (typeof target === 'string') return target;
+		if (typeof target.scheme === 'string' && typeof target.path === 'string') {
+			const authority = typeof target.authority === 'string' && target.authority ? `//${target.authority}` : '';
+			return `${target.scheme}:${authority}${target.path}`;
+		}
+		if (typeof target.toString === 'function') {
+			const text = target.toString();
+			return text && text !== '[object Object]' ? text : undefined;
+		}
+		return undefined;
+	}
+
+	private _uriLabel(value: any): string | undefined {
+		const target = value?.uri ?? value;
+		const valuePath = typeof target?.path === 'string' ? target.path : typeof target?.fsPath === 'string' ? target.fsPath : undefined;
+		return valuePath?.split(/[\\/]/).filter(Boolean).pop() || valuePath;
+	}
+
+	private _escapeMarkdown(value: string): string {
+		return value.replace(/[\\[\]]/g, '\\$&');
 	}
 
 	private _requestText(request: any): string {

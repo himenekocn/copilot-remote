@@ -129,6 +129,7 @@ class CopilotViewModel(
     private var settingsCollectorJob: Job? = null
     private val todoPollingJobs = mutableMapOf<String, Job>()
     private val thinkingSegments = mutableMapOf<String, Int>()
+    private val responseSegments = mutableMapOf<String, Int>()
     private val pendingFeedbacks = mutableMapOf<String, String>()
     private var fcmToken = ""
 
@@ -345,6 +346,7 @@ class CopilotViewModel(
             "chatStart" -> {
                 val requestId = json.optString("requestId")
                 thinkingSegments["$profileId:$requestId"] = 0
+                responseSegments["$profileId:$requestId"] = 0
                 val responseModelId = json.optString("modelId")
                 val responseReasoningEffort = json.optString("reasoningEffort")
                 updateConnection(profileId) { conn ->
@@ -353,7 +355,7 @@ class CopilotViewModel(
                     val messages = conn.chatMessages.toMutableList()
                     if (!isLocalRequest && prompt.isNotBlank()) {
                         messages.add(ChatMessage("user", prompt, id = "$requestId:user"))
-                        messages.add(ChatMessage("assistant", "", isStreaming = true, id = "$requestId:assistant"))
+                        messages.add(ChatMessage("assistant", "", isStreaming = true, id = "$requestId:assistant:0"))
                     }
                     conn.copy(
                         chatMessages = messages,
@@ -385,7 +387,8 @@ class CopilotViewModel(
                         if (lastIdx >= 0) {
                             messages[lastIdx] = messages[lastIdx].copy(content = messages[lastIdx].content + delta)
                         } else {
-                            messages.add(ChatMessage("assistant", delta, isStreaming = true, id = "$requestId:assistant"))
+                            val segment = responseSegments["$profileId:$requestId"] ?: 0
+                            messages.add(ChatMessage("assistant", delta, isStreaming = true, id = "$requestId:assistant:$segment"))
                         }
                         updateActiveSessionMessages(conn, messages)
                     }
@@ -399,15 +402,13 @@ class CopilotViewModel(
                     if (requestId.isNotBlank() && conn.activeRequestId.isNotBlank() && requestId != conn.activeRequestId) return@updateConnection conn
                     val messages = conn.chatMessages.toMutableList()
                     val lastIdx = messages.indexOfLast { it.isStreaming }
-                    val finalContent = fullResponse.ifEmpty { if (lastIdx >= 0) messages[lastIdx].content else "" }
-                    if (lastIdx >= 0 && finalContent.isBlank()) {
+                    if (lastIdx >= 0 && messages[lastIdx].content.isBlank()) {
                         messages.removeAt(lastIdx)
                     } else if (lastIdx >= 0) {
-                        messages[lastIdx] = messages[lastIdx].copy(
-                            content = finalContent,
-                            isStreaming = false
-                        )
-                    } else if (fullResponse.isNotEmpty()) {
+                        messages[lastIdx] = messages[lastIdx].copy(isStreaming = false)
+                    }
+                    val hasStreamedText = messages.any { it.id.startsWith("$requestId:assistant:") && it.content.isNotBlank() }
+                    if (!hasStreamedText && fullResponse.isNotEmpty()) {
                         messages.add(ChatMessage("assistant", fullResponse))
                     }
                     updateActiveSessionMessages(conn, messages).copy(isSending = false, activeRequestId = "")
@@ -452,8 +453,9 @@ class CopilotViewModel(
                     )
                     val index = messages.indexOfFirst { it.id == id }
                     if (index >= 0) messages[index] = message else {
-                        val streamingIndex = messages.indexOfLast { it.isStreaming }
-                        messages.add(if (streamingIndex >= 0) streamingIndex else messages.size, message)
+                        splitStreamingResponse(messages, profileId, requestId)
+                        messages.add(message)
+                        appendStreamingResponse(messages, profileId, requestId)
                     }
                     updateActiveSessionMessages(conn, messages)
                 }
@@ -1301,25 +1303,20 @@ class CopilotViewModel(
             syncUiState()
             return
         }
-        val messages = state.chatMessages.toMutableList()
-
-        messages.add(ChatMessage("user", text, attachments = attachments))
-        messages.add(ChatMessage("assistant", "", isStreaming = true))
+        val requestId = UUID.randomUUID().toString()
 
         // Update both the connection cache and the derived UI state.
         updateConnection(activeId) { conn ->
             updateActiveSessionMessages(
                 conn,
-                conn.chatMessages + ChatMessage("user", text, attachments = attachments) + ChatMessage("assistant", "", isStreaming = true),
-            ).copy(isSending = true)
+                conn.chatMessages + ChatMessage("user", text, attachments = attachments, id = "$requestId:user") + ChatMessage("assistant", "", isStreaming = true, id = "$requestId:assistant:0"),
+            ).copy(isSending = true, activeRequestId = requestId)
         }
         syncUiState()
 
         val apiMessages = state.chatMessages.filter { !it.isStreaming }.toMutableList()
         apiMessages.add(ChatMessage("user", text, attachments = attachments))
 
-        val requestId = UUID.randomUUID().toString()
-        updateConnection(activeId) { it.copy(activeRequestId = requestId) }
         val chatJson = JSONObject().apply {
             put("type", "chat")
             put("requestId", requestId)
@@ -1797,11 +1794,27 @@ class CopilotViewModel(
             val next = if (append && index >= 0) messages[index].content + content else content
             val message = ChatMessage("assistant", next, id = id, kind = kind, toolName = label)
             if (index >= 0) messages[index] = message else {
-                val streamingIndex = messages.indexOfLast { it.isStreaming }
-                messages.add(if (streamingIndex >= 0) streamingIndex else messages.size, message)
+                splitStreamingResponse(messages, profileId, requestId)
+                messages.add(message)
+                appendStreamingResponse(messages, profileId, requestId)
             }
             updateActiveSessionMessages(conn, messages)
         }
+    }
+
+    private fun splitStreamingResponse(messages: MutableList<ChatMessage>, profileId: String, requestId: String) {
+        val streamingIndex = messages.indexOfLast { it.isStreaming }
+        if (streamingIndex < 0) return
+        val streaming = messages[streamingIndex]
+        if (streaming.content.isBlank()) messages.removeAt(streamingIndex)
+        else messages[streamingIndex] = streaming.copy(isStreaming = false)
+    }
+
+    private fun appendStreamingResponse(messages: MutableList<ChatMessage>, profileId: String, requestId: String) {
+        val key = "$profileId:$requestId"
+        val segment = (responseSegments[key] ?: 0) + 1
+        responseSegments[key] = segment
+        messages.add(ChatMessage("assistant", "", isStreaming = true, id = "$requestId:assistant:$segment"))
     }
 
     private fun parseActiveSnapshotMessages(snapshot: JSONObject): List<ChatMessage> {

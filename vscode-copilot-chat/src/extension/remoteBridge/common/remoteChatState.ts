@@ -182,7 +182,7 @@ class RemoteChatState {
 			this._appendAssistant(sessionResource, requestId, tree ? `\n${tree}\n` : '');
 		} else if (part instanceof ChatResponseWarningPart || partName === 'ChatResponseWarningPart') {
 			const value = typeof record?.value === 'string' ? record.value : record?.value?.value;
-			this._appendAssistant(sessionResource, requestId, value ? `\n\n> ⚠️ ${value}\n` : '');
+			this._appendAssistant(sessionResource, requestId, value && !this._isInternalChatNoise(value) ? `\n\n> ⚠️ ${value}\n` : '');
 		} else if (part instanceof ChatResponseProgressPart || part instanceof ChatResponseProgressPart2 || partName === 'ChatResponseProgressPart' || partName === 'ChatResponseProgressPart2') {
 			const value = typeof record?.value === 'string' ? record.value : '';
 			if (value) {
@@ -200,6 +200,10 @@ class RemoteChatState {
 		if (index >= 0) messages[index] = { ...messages[index], content: messages[index].content + value };
 		this._update(sessionResource, { messages });
 		this._emit({ type: 'chatDelta', sessionResource, requestId, delta: value });
+	}
+
+	private _isInternalChatNoise(value: string): boolean {
+		return /ENOENT[^\n]*o200k_base\.tiktoken|github\.copilot-chat-[^\s\\/]+[\\/]dist[\\/]o200k_base\.tiktoken/i.test(value);
 	}
 
 	private _upsertThinking(sessionResource: string, requestId: string, thinkingId: string, value: string, done: boolean): void {
@@ -280,6 +284,10 @@ class RemoteChatState {
 		const target = value?.uri ?? value;
 		if (!target) return undefined;
 		if (typeof target === 'string') return target;
+		if (typeof target.scheme === 'string' && typeof target.path === 'string') {
+			const authority = typeof target.authority === 'string' && target.authority ? `//${target.authority}` : '';
+			return `${target.scheme}:${authority}${target.path}`;
+		}
 		if (typeof target.toString === 'function') {
 			const text = target.toString();
 			return text && text !== '[object Object]' ? text : undefined;
