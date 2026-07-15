@@ -74,7 +74,7 @@ fun AppNavigation(viewModel: CopilotViewModel) {
     val content: @Composable () -> Unit = {
         Scaffold(
             topBar = {
-                SmallTopAppBar(
+                if (route != Screen.Chat.route) SmallTopAppBar(
                     title = screens.firstOrNull { it.route == route }?.title ?: "Copilot",
                     navigationIcon = { if (!tablet) IconButton(onClick = { drawerOpen = true }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Menu, "打开菜单", modifier = Modifier.size(22.dp)) } },
                     actions = { if (route == Screen.Chat.route) IconButton(onClick = viewModel::newChatSession, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.AddComment, "新建对话", modifier = Modifier.size(22.dp)) } },
@@ -83,7 +83,7 @@ fun AppNavigation(viewModel: CopilotViewModel) {
             containerColor = MiuixTheme.colorScheme.background,
         ) { padding ->
             NavHost(nav, if (state.connectionState == ConnectionState.AUTHENTICATED) Screen.Chat.route else Screen.Settings.route, Modifier.padding(padding).consumeWindowInsets(padding)) {
-                composable(Screen.Chat.route) { ChatScreen(viewModel) }
+                composable(Screen.Chat.route) { ChatScreen(viewModel, onOpenNavigation = { drawerOpen = true }) }
                 composable(Screen.Explorer.route) { ExplorerScreen(viewModel) }
                 composable(Screen.Workspace.route) { WorkspaceScreen(viewModel) }
                 composable(Screen.Terminal.route) { TerminalScreen(viewModel) }
