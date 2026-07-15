@@ -34,7 +34,10 @@ export class CopilotApi {
   }
 
   async listTerminals() {
-    return Promise.all(vscode.window.terminals.map((terminal) => this.terminalInfo(terminal)));
+    const visibleTerminals = vscode.window.terminals.filter(terminal =>
+      terminal === vscode.window.activeTerminal || terminal.state.isInteractedWith,
+    );
+    return Promise.all(visibleTerminals.map((terminal) => this.terminalInfo(terminal)));
   }
 
   async createTerminal(name = 'Copilot Remote', cwd?: string) {
@@ -53,17 +56,36 @@ export class CopilotApi {
   async executeTerminal(terminalId: string, command: string) {
     const terminal = await this.findTerminal(terminalId);
     if (!terminal) throw new Error(`Terminal not found: ${terminalId}`);
-    // ponytail: one-shot execution cannot preserve shell variables; use a PTY protocol if persistent sessions become required.
-    const cwd = terminal.shellIntegration?.cwd?.fsPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const executable = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/sh';
-    const args = process.platform === 'win32' ? ['-NoProfile', '-NonInteractive', '-Command', command] : ['-lc', command];
-    try {
-      const result = await promisify(execFile)(executable, args, { cwd, windowsHide: true, timeout: 300_000, maxBuffer: 8 * 1024 * 1024 });
-      return `${result.stdout}${result.stderr}` || '(command completed with no output)';
-    } catch (error) {
-      const failed = error as Error & { stdout?: string; stderr?: string };
-      throw new Error(`${failed.stdout || ''}${failed.stderr || ''}`.trim() || failed.message);
+    terminal.show(true);
+    const shellIntegration = terminal.shellIntegration || await new Promise<vscode.TerminalShellIntegration | undefined>(resolve => {
+      const timeout = setTimeout(() => { listener.dispose(); resolve(undefined); }, 5000);
+      const listener = vscode.window.onDidChangeTerminalShellIntegration(event => {
+        if (event.terminal !== terminal) return;
+        clearTimeout(timeout);
+        listener.dispose();
+        resolve(event.shellIntegration);
+      });
+    });
+    if (!shellIntegration) {
+      throw new Error('VS Code terminal shell integration is unavailable. Enable terminal.integrated.shellIntegration.enabled and reopen the terminal.');
     }
+
+    let execution: vscode.TerminalShellExecution;
+    const end = new Promise<number | undefined>(resolve => {
+      const listener = vscode.window.onDidEndTerminalShellExecution(event => {
+        if (event.terminal !== terminal || event.execution !== execution) return;
+        listener.dispose();
+        resolve(event.exitCode);
+      });
+    });
+    execution = shellIntegration.executeCommand(command);
+    let output = '';
+    for await (const chunk of execution.read()) {
+      output += chunk;
+      if (output.length > 8 * 1024 * 1024) output = output.slice(-8 * 1024 * 1024);
+    }
+    const exitCode = await end;
+    return { output: output || '(command completed with no output)', exitCode };
   }
 
   private async findTerminal(terminalId: string) {

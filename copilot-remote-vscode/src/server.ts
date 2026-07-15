@@ -464,8 +464,8 @@ export class CopilotRemoteServer {
 
       case 'executeTerminal': {
         try {
-          const output = await this.copilotApi.executeTerminal(message.terminalId, message.command);
-          this.send(ws, { type: 'terminalOutput', terminalId: message.terminalId, command: message.command, output });
+          const result = await this.copilotApi.executeTerminal(message.terminalId, message.command);
+          this.send(ws, { type: 'terminalOutput', terminalId: message.terminalId, command: message.command, ...result });
         } catch (err) {
           this.send(ws, { type: 'terminalOutput', terminalId: message.terminalId, command: message.command, output: '', error: err instanceof Error ? err.message : String(err) });
         }
