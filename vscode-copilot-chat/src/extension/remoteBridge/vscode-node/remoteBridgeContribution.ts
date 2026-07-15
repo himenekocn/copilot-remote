@@ -351,7 +351,8 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		const body = await this._readJsonBody(req);
 		const requestId = typeof body.requestId === 'string' && body.requestId.trim() ? body.requestId : crypto.randomUUID();
 		const targetSessionResource = typeof body.sessionResource === 'string' ? body.sessionResource : undefined;
-		const activeSessionResource = vscode.window.activeChatPanelSessionResource?.toString();
+		const activeSessionUri = vscode.window.activeChatPanelSessionResource;
+		const activeSessionResource = activeSessionUri?.toString();
 		if (!activeSessionResource) {
 			this._sendJson(res, 409, { error: 'No active Copilot Chat panel session. Open the target chat in VS Code first.' });
 			return;
@@ -401,7 +402,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 			if (participant) {
 				await vscode.commands.executeCommand('workbench.action.chat.toggleAgentMode', {
 					modeId: participant,
-					sessionResource: activeSessionResource,
+					sessionResource: activeSessionUri,
 				});
 			}
 			await vscode.commands.executeCommand('workbench.action.chat.open', {
