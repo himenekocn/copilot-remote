@@ -91,6 +91,7 @@ export interface CommandInfo {
   category?: string;
   isCopilot?: boolean;
 }
+export interface SlashCommandInfo { name: string; description: string; source: string; }
 
 // ─── Participant Types ──────────────────────────────────────
 
@@ -242,6 +243,7 @@ export type ClientMessage =
   | { type: 'chat'; requestId: string; modelId?: string; messages: ChatMessage[]; options?: ChatOptions }
   | { type: 'cancelChat'; requestId: string }
   | { type: 'listCommands' }
+  | { type: 'listSlashCommands' }
   | { type: 'executeCommand'; commandId: string; args?: unknown[] }
   | { type: 'getChatHistory' }
   | { type: 'clearHistory' }
@@ -314,6 +316,7 @@ export type ServerMessage =
   | { type: 'chatError'; requestId: string; error: string; code?: string }
   | { type: 'chatCancelled'; requestId: string }
   | { type: 'commands'; commands: CommandInfo[] }
+  | { type: 'slashCommands'; commands: SlashCommandInfo[] }
   | { type: 'commandResult'; commandId: string; result: unknown; error?: string }
   | { type: 'chatHistory'; history: ChatHistoryItem[] }
   | { type: 'historyCleared' }

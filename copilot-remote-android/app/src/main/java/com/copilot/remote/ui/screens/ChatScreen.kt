@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -52,6 +53,7 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     LaunchedEffect(state.pendingSharedText) { if (state.pendingSharedText.isNotBlank()) { input = state.pendingSharedText; viewModel.consumeSharedText() } }
     LaunchedEffect(state.pendingSharedImageUri) { if (state.pendingSharedImageUri.isNotBlank()) { attach(Uri.parse(state.pendingSharedImageUri)); viewModel.consumeSharedImage() } }
     LaunchedEffect(state.pendingCaptureAttachment) { state.pendingCaptureAttachment?.let { attachments = attachments + it; viewModel.consumeCaptureAttachment() } }
+    LaunchedEffect(Unit) { viewModel.refreshSlashCommands() }
     LaunchedEffect(state.chatMessages.size, state.chatMessages.lastOrNull()?.content?.length) { if (state.chatMessages.isNotEmpty()) listState.animateScrollToItem(state.chatMessages.lastIndex) }
     val send = {
         if (input.isNotBlank() || attachments.isNotEmpty()) {
@@ -107,6 +109,33 @@ fun ChatScreen(viewModel: CopilotViewModel) {
         }
         if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             attachments.forEachIndexed { index, item -> TextButton("${item.name} ×", { attachments = attachments.filterIndexed { i, _ -> i != index } }) }
+        }
+        val slashQuery = input.takeIf { it.startsWith("/") && !it.contains(Regex("\\s")) }?.drop(1)
+        val slashMatches = if (slashQuery == null) emptyList() else state.slashCommands.filter { it.name.contains(slashQuery, ignoreCase = true) }.take(8)
+        if (slashQuery != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MiuixTheme.colorScheme.surfaceContainer,
+            ) {
+                if (slashMatches.isEmpty()) {
+                    Text("没有匹配的 / 指令", color = MiuixTheme.colorScheme.onSurfaceSecondary, modifier = Modifier.padding(14.dp))
+                } else LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                    items(slashMatches, key = { "${it.source}:${it.name}" }) { command ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { input = "/${command.name} " }.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("/${command.name}", color = MiuixTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 96.dp))
+                            Column(Modifier.weight(1f)) {
+                                if (command.description.isNotBlank()) Text(command.description, style = MiuixTheme.textStyles.footnote1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(command.source, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
         }
         Surface(
             modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp),

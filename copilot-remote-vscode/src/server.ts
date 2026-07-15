@@ -278,6 +278,9 @@ export class CopilotRemoteServer {
       case 'listCommands':
         await this.handleListCommands(ws);
         break;
+      case 'listSlashCommands':
+        this.send(ws, { type: 'slashCommands', commands: await this.copilotApi.listSlashCommands() });
+        break;
 
       case 'executeCommand':
         await this.handleExecuteCommand(ws, message.commandId, message.args);

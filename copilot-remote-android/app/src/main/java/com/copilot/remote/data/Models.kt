@@ -118,6 +118,7 @@ data class CommandInfo(
     val id: String,
     val isCopilot: Boolean = false,
 )
+data class SlashCommandInfo(val name: String, val description: String, val source: String)
 
 // ─── Participants / Agents ────────────────────────────────────
 
@@ -282,6 +283,7 @@ data class Connection(
     val models: List<ModelInfo> = emptyList(),
     val participants: List<ParticipantInfo> = emptyList(),
     val commands: List<CommandInfo> = emptyList(),
+    val slashCommands: List<SlashCommandInfo> = emptyList(),
     val extensions: List<ExtensionInfo> = emptyList(),
     val mcpServers: List<McpServerInfo> = emptyList(),
     val skills: List<SkillInfo> = emptyList(),
@@ -366,6 +368,14 @@ fun parseCommands(json: JSONObject): List<CommandInfo> {
             id = c.optString("id"),
             isCopilot = c.optBoolean("isCopilot"),
         )
+    }
+}
+
+fun parseSlashCommands(json: JSONObject): List<SlashCommandInfo> {
+    val arr = json.optJSONArray("commands") ?: return emptyList()
+    return (0 until arr.length()).map { i ->
+        val command = arr.getJSONObject(i)
+        SlashCommandInfo(command.optString("name"), command.optString("description"), command.optString("source"))
     }
 }
 

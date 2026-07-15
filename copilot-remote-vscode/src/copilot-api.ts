@@ -9,6 +9,7 @@ import { promisify } from 'util';
 import type {
   ModelInfo,
   CommandInfo,
+  SlashCommandInfo,
   ParticipantInfo,
   ExtensionInfo,
   McpServerInfo,
@@ -797,6 +798,16 @@ export class CopilotApi {
 
   async executeCommand(commandId: string, args?: unknown[]): Promise<unknown> {
     return vscode.commands.executeCommand(commandId, ...(args || []));
+  }
+
+  async listSlashCommands(): Promise<SlashCommandInfo[]> {
+    const builtIn: SlashCommandInfo[] = [
+      ['compact', '压缩当前对话上下文'], ['explain', '解释选中或当前代码'], ['fix', '分析并修复问题'],
+      ['new', '创建新项目或文件'], ['setupTests', '配置测试框架'], ['tests', '为代码生成测试'],
+    ].map(([name, description]) => ({ name, description, source: 'Copilot' }));
+    const participants = await this.listParticipants();
+    const commands = participants.flatMap(participant => participant.commands.map(command => ({ name: command.name.replace(/^\//, ''), description: command.description, source: participant.fullName || participant.name })));
+    return [...builtIn, ...commands].filter((command, index, all) => all.findIndex(item => item.name.toLowerCase() === command.name.toLowerCase()) === index).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ─── Chat Participants (Agents) ─────────────────────────────

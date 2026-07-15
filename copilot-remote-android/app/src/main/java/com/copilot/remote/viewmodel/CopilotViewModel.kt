@@ -20,6 +20,7 @@ data class CopilotUiState(
     val models: List<ModelInfo> = emptyList(),
     val participants: List<ParticipantInfo> = emptyList(),
     val commands: List<CommandInfo> = emptyList(),
+    val slashCommands: List<SlashCommandInfo> = emptyList(),
     val extensions: List<ExtensionInfo> = emptyList(),
     val mcpServers: List<McpServerInfo> = emptyList(),
     val skills: List<SkillInfo> = emptyList(),
@@ -105,7 +106,7 @@ class CopilotViewModel(
     private val INSTANCE_SCOPED_RESPONSE_TYPES = setOf(
         "models", "status", "workspaceInfo", "openEditors", "chatHistory",
         "activeChatSession", "activeSessionChanged", "todoUpdated", "nativeChatSessions",
-        "nativeChatSession", "participants", "commands", "extensions", "mcpServers", "skills", "tools",
+        "nativeChatSession", "participants", "commands", "slashCommands", "extensions", "mcpServers", "skills", "tools",
         "terminals", "terminalOutput", "searchResults", "directoryEntries", "fileContent",
         "fileSaved", "fileOpened", "fileClosed", "gitStatus", "gitDiff", "gitHistory",
         "pullRequests", "windowCapture", "chatStart", "chatDelta", "chatThinkingDelta",
@@ -511,6 +512,7 @@ class CopilotViewModel(
             "commands" -> {
                 updateConnection(profileId) { it.copy(commands = parseCommands(json)) }
             }
+            "slashCommands" -> updateConnection(profileId) { it.copy(slashCommands = parseSlashCommands(json)) }
 
             "commandResult" -> {
                 val commandId = json.optString("commandId")
@@ -904,6 +906,7 @@ class CopilotViewModel(
                 models = activeConn?.models ?: emptyList(),
                 participants = activeConn?.participants ?: emptyList(),
                 commands = activeConn?.commands ?: emptyList(),
+                slashCommands = activeConn?.slashCommands ?: emptyList(),
                 extensions = activeConn?.extensions ?: emptyList(),
                 mcpServers = activeConn?.mcpServers ?: emptyList(),
                 skills = activeConn?.skills ?: emptyList(),
@@ -1086,6 +1089,7 @@ class CopilotViewModel(
                     models = emptyList(),
                     participants = emptyList(),
                     commands = emptyList(),
+                    slashCommands = emptyList(),
                     extensions = emptyList(),
                     mcpServers = emptyList(),
                     skills = emptyList(),
@@ -1477,6 +1481,7 @@ class CopilotViewModel(
     fun refreshModels() = refreshCommand("listModels", "models", "模型列表已刷新")
     fun refreshParticipants() = refreshCommand("listParticipants", "participants", "智能体列表已刷新")
     fun refreshCommands() = refreshCommand("listCommands", "commands", "命令列表已刷新")
+    fun refreshSlashCommands() = sendViaActiveConnection(buildJsonCommand("listSlashCommands") {})
     fun refreshExtensions() = refreshCommand("listExtensions", "extensions", "扩展列表已刷新")
     fun refreshMcpServers() = refreshCommand("listMcpServers", "mcpServers", "MCP 服务已刷新")
     fun refreshSkills() = sendViaActiveConnection(buildJsonCommand("listSkills") {})
@@ -1668,6 +1673,7 @@ class CopilotViewModel(
         sendViaConnection(profileId, buildJsonCommand("listModels") {})
         sendViaConnection(profileId, buildJsonCommand("listParticipants") {})
         sendViaConnection(profileId, buildJsonCommand("listCommands") {})
+        sendViaConnection(profileId, buildJsonCommand("listSlashCommands") {})
         sendViaConnection(profileId, buildJsonCommand("listExtensions") {})
         sendViaConnection(profileId, buildJsonCommand("listMcpServers") {})
         sendViaConnection(profileId, buildJsonCommand("listSkills") {})
