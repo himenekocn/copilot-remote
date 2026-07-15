@@ -30,8 +30,6 @@ build/
 **/build/
 !vscode-copilot-chat/script/build/
 !vscode-copilot-chat/script/build/**
-!vscode-copilot-chat/src/platform/env/
-!vscode-copilot-chat/src/platform/env/**
 local.properties
 **/local.properties
 .navigation/
@@ -63,6 +61,8 @@ vscode-copilot-chat/.vscode/extensions/*
 /.venv/
 venv/
 env/
+!vscode-copilot-chat/src/platform/env/
+!vscode-copilot-chat/src/platform/env/**
 .python-version
 /.agents/
 /.codex/
