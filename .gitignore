@@ -30,6 +30,8 @@ build/
 **/build/
 !vscode-copilot-chat/script/build/
 !vscode-copilot-chat/script/build/**
+!vscode-copilot-chat/src/platform/env/
+!vscode-copilot-chat/src/platform/env/**
 local.properties
 **/local.properties
 .navigation/
@@ -46,6 +48,12 @@ captures/
 
 # ─── IDE / local tooling ───────────────────────────────────────
 .vscode/
+!vscode-copilot-chat/.vscode/
+vscode-copilot-chat/.vscode/*
+!vscode-copilot-chat/.vscode/extensions/
+vscode-copilot-chat/.vscode/extensions/*
+!vscode-copilot-chat/.vscode/extensions/test-extension/
+!vscode-copilot-chat/.vscode/extensions/test-extension/**
 .idea/
 *.iml
 *.code-workspace
