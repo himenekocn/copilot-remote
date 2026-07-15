@@ -106,6 +106,22 @@ export class CopilotApi {
     return true;
   }
 
+  async captureTerminal(terminalId: string) {
+    const terminal = await this.findTerminal(terminalId);
+    if (!terminal) throw new Error(`Terminal not found: ${terminalId}`);
+    const previousClipboard = await vscode.env.clipboard.readText();
+    terminal.show(true);
+    try {
+      await vscode.commands.executeCommand('workbench.action.terminal.selectAll');
+      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+      const content = await vscode.env.clipboard.readText();
+      await vscode.commands.executeCommand('workbench.action.terminal.clearSelection');
+      return { id: terminalId, name: terminal.name, content };
+    } finally {
+      await vscode.env.clipboard.writeText(previousClipboard);
+    }
+  }
+
   async executeTerminal(terminalId: string, command: string) {
     const terminal = await this.findTerminal(terminalId);
     if (!terminal) throw new Error(`Terminal not found: ${terminalId}`);

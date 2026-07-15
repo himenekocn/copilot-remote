@@ -269,6 +269,7 @@ export type ClientMessage =
   | { type: 'getActiveEditorContent' }
   | { type: 'insertText'; text: string; position?: { line: number; character: number } }
   | { type: 'listTerminals' }
+  | { type: 'captureTerminal'; terminalId: string }
   | { type: 'createTerminal'; name?: string; cwd?: string }
   | { type: 'closeTerminal'; terminalId: string }
   | { type: 'executeTerminal'; terminalId: string; command: string }
@@ -341,6 +342,7 @@ export type ServerMessage =
   | { type: 'textInserted'; success: boolean; error?: string }
   | { type: 'terminals'; terminals: TerminalInfo[] }
   | { type: 'terminalCreated'; terminal: TerminalInfo }
+  | { type: 'terminalCapture'; terminal?: { id: string; name: string; content: string }; error?: string }
   | { type: 'terminalClosed'; terminalId: string; success: boolean; error?: string }
   | { type: 'terminalOutput'; terminalId: string; command: string; output: string; exitCode?: number; error?: string }
   | { type: 'searchResults'; kind: 'files' | 'text' | 'symbols' | 'definitions' | 'references'; results: unknown[]; error?: string }

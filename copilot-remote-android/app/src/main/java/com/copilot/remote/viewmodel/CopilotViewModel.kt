@@ -73,6 +73,7 @@ data class CopilotUiState(
     val pendingSharedText: String = "",
     val pendingSharedImageUri: String = "",
     val pendingCaptureAttachment: ChatAttachment? = null,
+    val pendingTerminalAttachment: ChatAttachment? = null,
     val pushStatus: String = "正在检查推送通知…",
     val captureFrames: List<String> = emptyList(),
     val captureIntervalMs: Int = 0,
@@ -107,7 +108,7 @@ class CopilotViewModel(
         "models", "status", "workspaceInfo", "openEditors", "chatHistory",
         "activeChatSession", "activeSessionChanged", "todoUpdated", "nativeChatSessions",
         "nativeChatSession", "participants", "commands", "slashCommands", "extensions", "mcpServers", "skills", "tools",
-        "terminals", "terminalOutput", "searchResults", "directoryEntries", "fileContent",
+        "terminals", "terminalOutput", "terminalCapture", "searchResults", "directoryEntries", "fileContent",
         "fileSaved", "fileOpened", "fileClosed", "gitStatus", "gitDiff", "gitHistory",
         "pullRequests", "windowCapture", "chatStart", "chatDelta", "chatThinkingDelta",
         "toolUpdated", "chatUsage", "chatDone", "chatError", "chatCancelled",
@@ -533,6 +534,16 @@ class CopilotViewModel(
                         TerminalInfo(terminal.optString("id"), terminal.optString("name"), terminal.optInt("processId").takeIf { terminal.has("processId") }, terminal.optBoolean("isActive"))
                     }
                 })
+            }
+            "terminalCapture" -> {
+                val error = json.optString("error")
+                if (error.isNotBlank()) _uiState.update { it.copy(errorMessage = error) }
+                else json.optJSONObject("terminal")?.let { terminal ->
+                    val name = terminal.optString("name", "终端")
+                    val content = terminal.optString("content")
+                    val attachment = ChatAttachment("$name.txt", "text/plain", android.util.Base64.encodeToString(content.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP))
+                    _uiState.update { it.copy(pendingTerminalAttachment = attachment) }
+                }
             }
 
             "terminalCreated" -> sendViaConnection(profileId, buildJsonCommand("listTerminals") {})
@@ -1496,6 +1507,8 @@ class CopilotViewModel(
     }
     fun resetTools() = selectEnabledTools(null)
     fun refreshTerminals() = sendViaActiveConnection(buildJsonCommand("listTerminals") {})
+    fun captureTerminalForChat(terminalId: String) = sendViaActiveConnection(buildJsonCommand("captureTerminal") { put("terminalId", terminalId) })
+    fun consumeTerminalAttachment() { _uiState.update { it.copy(pendingTerminalAttachment = null) } }
 
     fun createTerminal(name: String) = sendViaActiveConnection(buildJsonCommand("createTerminal") {
         if (name.isNotBlank()) put("name", name)

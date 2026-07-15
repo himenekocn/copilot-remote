@@ -456,6 +456,10 @@ export class CopilotRemoteServer {
       case 'listTerminals':
         this.send(ws, { type: 'terminals', terminals: await this.copilotApi.listTerminals() });
         break;
+      case 'captureTerminal':
+        try { this.send(ws, { type: 'terminalCapture', terminal: await this.copilotApi.captureTerminal(message.terminalId) }); }
+        catch (err) { this.send(ws, { type: 'terminalCapture', error: err instanceof Error ? err.message : String(err) }); }
+        break;
 
       case 'createTerminal': {
         const terminal = await this.copilotApi.createTerminal(message.name, message.cwd);

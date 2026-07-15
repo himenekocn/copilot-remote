@@ -368,7 +368,12 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		}
 		const rawMessages = Array.isArray(body.messages) ? body.messages as RemoteBridgeChatMessage[] : [];
 		const latestUserMessage = rawMessages.filter(message => message.role !== 'assistant').at(-1);
-		const prompt = typeof body.prompt === 'string' ? body.prompt : latestUserMessage?.content || '';
+		let prompt = typeof body.prompt === 'string' ? body.prompt : latestUserMessage?.content || '';
+		const textAttachments = (latestUserMessage?.attachments || []).filter(attachment => attachment.mimeType?.startsWith('text/') && attachment.dataBase64);
+		for (const attachment of textAttachments) {
+			const content = Buffer.from(attachment.dataBase64!, 'base64').toString('utf8').slice(-120000);
+			prompt += `\n\n<terminal_context name="${(attachment.name || 'terminal').replace(/"/g, '&quot;')}">\n${content}\n</terminal_context>`;
+		}
 		if (!prompt.trim()) {
 			this._sendJson(res, 400, { error: 'Missing prompt' });
 			return;

@@ -41,6 +41,7 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     var showAgents by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
     var showSessions by remember { mutableStateOf(false) }
+    var showTerminals by remember { mutableStateOf(false) }
     val attach: (Uri) -> Unit = { uri ->
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -53,6 +54,7 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     LaunchedEffect(state.pendingSharedText) { if (state.pendingSharedText.isNotBlank()) { input = state.pendingSharedText; viewModel.consumeSharedText() } }
     LaunchedEffect(state.pendingSharedImageUri) { if (state.pendingSharedImageUri.isNotBlank()) { attach(Uri.parse(state.pendingSharedImageUri)); viewModel.consumeSharedImage() } }
     LaunchedEffect(state.pendingCaptureAttachment) { state.pendingCaptureAttachment?.let { attachments = attachments + it; viewModel.consumeCaptureAttachment() } }
+    LaunchedEffect(state.pendingTerminalAttachment) { state.pendingTerminalAttachment?.let { attachments = attachments + it; viewModel.consumeTerminalAttachment() } }
     LaunchedEffect(Unit) { viewModel.refreshSlashCommands() }
     LaunchedEffect(state.chatMessages.size, state.chatMessages.lastOrNull()?.content?.length) { if (state.chatMessages.isNotEmpty()) listState.animateScrollToItem(state.chatMessages.lastIndex) }
     val send = {
@@ -151,6 +153,12 @@ fun ChatScreen(viewModel: CopilotViewModel) {
                 ) {
                     Icon(Icons.Default.Add, "添加图片", modifier = Modifier.size(21.dp))
                 }
+                IconButton(
+                    onClick = { viewModel.refreshTerminals(); showTerminals = true },
+                    enabled = !state.isSending,
+                    modifier = Modifier.size(44.dp),
+                    backgroundColor = MiuixTheme.colorScheme.surfaceContainer,
+                ) { Icon(Icons.Default.Terminal, "附加终端", modifier = Modifier.size(20.dp)) }
                 BasicTextField(
                     value = input,
                     onValueChange = { input = it },
@@ -227,6 +235,20 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     }
     SuperDialog(show = showTools, title = "配置工具", onDismissRequest = { showTools = false }) {
         ToolConfiguration(state.tools, state.enabledTools, viewModel::toggleTool, viewModel::setTools, viewModel::resetTools, Modifier.heightIn(max = 560.dp), compact = true)
+    }
+    SuperDialog(show = showTerminals, title = "附加 VS Code 终端", onDismissRequest = { showTerminals = false }) {
+        Column(Modifier.heightIn(max = 420.dp)) {
+            Text("选择后会读取该终端当前可复制的历史输出，并作为上下文附加到输入框。", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceSecondary, modifier = Modifier.padding(bottom = 8.dp))
+            if (state.terminals.isEmpty()) Text("没有可附加的集成终端", modifier = Modifier.padding(16.dp))
+            else LazyColumn {
+                items(state.terminals, key = { it.id }) { terminal ->
+                    BasicComponent(title = terminal.name, summary = listOfNotNull(terminal.processId?.let { "PID $it" }, if (terminal.isActive) "当前终端" else null).joinToString(" · "), onClick = {
+                        viewModel.captureTerminalForChat(terminal.id)
+                        showTerminals = false
+                    })
+                }
+            }
+        }
     }
     SuperDialog(show = showSessions, title = "VS Code 对话", onDismissRequest = { showSessions = false }) {
         LazyColumn(Modifier.heightIn(max = 520.dp)) {
