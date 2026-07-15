@@ -150,6 +150,15 @@ export interface SkillInfo {
   sourceLabel?: string;
 }
 
+export interface ToolInfo {
+  id: string;
+  name: string;
+  description: string;
+  groupId: string;
+  groupName: string;
+  source: 'builtin' | 'mcp' | 'extension';
+}
+
 // ─── Workspace Types ────────────────────────────────────────
 
 export interface WorkspaceInfo {
@@ -247,6 +256,7 @@ export type ClientMessage =
   | { type: 'addMcpServer'; config: McpServerInfo }
   | { type: 'removeMcpServer'; name: string }
   | { type: 'listSkills' }
+  | { type: 'listTools' }
   | { type: 'invokeSkill'; skillId: string; args?: Record<string, unknown> }
   | { type: 'getWorkspaceInfo' }
   | { type: 'getOpenEditors' }
@@ -316,6 +326,7 @@ export type ServerMessage =
   | { type: 'mcpServerAdded'; success: boolean; error?: string }
   | { type: 'mcpServerRemoved'; success: boolean; error?: string }
   | { type: 'skills'; skills: SkillInfo[] }
+  | { type: 'tools'; tools: ToolInfo[] }
   | { type: 'skillInvoked'; skillId: string; success: boolean; result?: unknown; error?: string }
   | { type: 'workspaceInfo'; info: WorkspaceInfo }
   | { type: 'openEditors'; editors: EditorInfo[] }

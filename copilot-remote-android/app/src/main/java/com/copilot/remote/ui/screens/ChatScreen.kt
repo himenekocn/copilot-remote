@@ -38,6 +38,7 @@ fun ChatScreen(viewModel: CopilotViewModel) {
     var attachments by remember { mutableStateOf<List<ChatAttachment>>(emptyList()) }
     var showModels by remember { mutableStateOf(false) }
     var showAgents by remember { mutableStateOf(false) }
+    var showTools by remember { mutableStateOf(false) }
     var showSessions by remember { mutableStateOf(false) }
     val attach: (Uri) -> Unit = { uri ->
         runCatching {
@@ -70,6 +71,8 @@ fun ChatScreen(viewModel: CopilotViewModel) {
             Spacer(Modifier.width(8.dp))
             val selectedAgent = state.participants.find { it.name == state.selectedParticipant || it.id == state.selectedParticipant }
             TextButton(selectedAgent?.fullName ?: "直接对话", { showAgents = true })
+            Spacer(Modifier.width(8.dp))
+            TextButton(state.enabledTools?.let { "工具 · ${it.size}" } ?: "工具 · 默认", { showTools = true })
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { showSessions = true }, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.History, "全部对话", modifier = Modifier.size(20.dp)) }
         }
@@ -192,6 +195,9 @@ fun ChatScreen(viewModel: CopilotViewModel) {
             item { BasicComponent(title = "直接对话", onClick = { viewModel.selectParticipant(""); showAgents = false }) }
             items(state.participants.distinctBy { it.name.lowercase() }, key = { it.id }) { agent -> BasicComponent(title = agent.fullName, summary = agent.description, endActions = { if (agent.name == state.selectedParticipant) Icon(Icons.Default.Check, null) }, onClick = { viewModel.selectParticipant(agent.name); showAgents = false }) }
         }
+    }
+    SuperDialog(show = showTools, title = "配置工具", onDismissRequest = { showTools = false }) {
+        ToolConfiguration(state.tools, state.enabledTools, viewModel::toggleTool, viewModel::setTools, viewModel::resetTools, Modifier.heightIn(max = 560.dp), compact = true)
     }
     SuperDialog(show = showSessions, title = "VS Code 对话", onDismissRequest = { showSessions = false }) {
         LazyColumn(Modifier.heightIn(max = 520.dp)) {

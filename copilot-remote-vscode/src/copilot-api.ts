@@ -13,6 +13,7 @@ import type {
   ExtensionInfo,
   McpServerInfo,
   SkillInfo,
+  ToolInfo,
   WorkspaceInfo,
   EditorInfo,
   ChatMessage,
@@ -27,6 +28,57 @@ import type {
 export class CopilotApi {
   private chatHistory: ChatHistoryItem[] = [];
   private cachedModels: ModelInfo[] = [];
+
+  async listTools(): Promise<ToolInfo[]> {
+    const contributionOwners = new Map<string, { id: string; name: string }>();
+    for (const extension of vscode.extensions.all) {
+      const contributed = extension.packageJSON?.contributes?.languageModelTools;
+      if (!Array.isArray(contributed)) continue;
+      for (const tool of contributed) {
+        if (typeof tool?.name === 'string') {
+          contributionOwners.set(tool.name, {
+            id: extension.id,
+            name: extension.packageJSON?.displayName || extension.packageJSON?.name || extension.id,
+          });
+        }
+      }
+    }
+    const mcpServers = await this.listMcpServers();
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const builtinGroup = (name: string) => {
+      const value = name.toLowerCase();
+      if (/read|file/.test(value)) return ['builtin.read', '读取'];
+      if (/search|find|grep/.test(value)) return ['builtin.search', '搜索'];
+      if (/todo|task/.test(value)) return ['builtin.todo', '任务'];
+      if (/web|fetch|http/.test(value)) return ['builtin.web', '网页'];
+      if (/terminal|shell|powershell|python/.test(value)) return ['builtin.terminal', '终端'];
+      return ['builtin.vscode', 'VS Code'];
+    };
+    return vscode.lm.tools.map(tool => {
+      const owner = contributionOwners.get(tool.name);
+      const normalizedName = normalize(tool.name);
+      const server = mcpServers.find(item => {
+        const key = normalize(item.name);
+        return key.length >= 3 && normalizedName.includes(key);
+      });
+      let source: ToolInfo['source'];
+      let groupId: string;
+      let groupName: string;
+      if (server || /(^|[._-])mcp([._-]|$)/i.test(tool.name)) {
+        source = 'mcp';
+        groupId = `mcp.${server?.name || tool.name.split(/[._-]/)[1] || 'other'}`;
+        groupName = server?.name || 'MCP 工具';
+      } else if (owner && owner.id !== 'github.copilot-chat') {
+        source = 'extension';
+        groupId = `extension.${owner.id}`;
+        groupName = owner.name;
+      } else {
+        source = 'builtin';
+        [groupId, groupName] = builtinGroup(tool.name);
+      }
+      return { id: tool.name, name: tool.name, description: tool.description || '', groupId, groupName, source };
+    }).sort((a, b) => a.groupName.localeCompare(b.groupName) || a.name.localeCompare(b.name));
+  }
 
   private async terminalInfo(terminal: vscode.Terminal) {
     const processId = await terminal.processId;

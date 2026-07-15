@@ -23,6 +23,7 @@ data class CopilotUiState(
     val extensions: List<ExtensionInfo> = emptyList(),
     val mcpServers: List<McpServerInfo> = emptyList(),
     val skills: List<SkillInfo> = emptyList(),
+    val tools: List<ToolInfo> = emptyList(),
     val workspaceInfo: WorkspaceInfo? = null,
     val chatSessions: List<ChatSession> = emptyList(),
     val activeChatSessionId: String = "",
@@ -104,7 +105,7 @@ class CopilotViewModel(
     private val INSTANCE_SCOPED_RESPONSE_TYPES = setOf(
         "models", "status", "workspaceInfo", "openEditors", "chatHistory",
         "activeChatSession", "activeSessionChanged", "todoUpdated", "nativeChatSessions",
-        "nativeChatSession", "participants", "commands", "extensions", "mcpServers", "skills",
+        "nativeChatSession", "participants", "commands", "extensions", "mcpServers", "skills", "tools",
         "terminals", "terminalOutput", "searchResults", "directoryEntries", "fileContent",
         "fileSaved", "fileOpened", "fileClosed", "gitStatus", "gitDiff", "gitHistory",
         "pullRequests", "windowCapture", "chatStart", "chatDelta", "chatThinkingDelta",
@@ -754,6 +755,12 @@ class CopilotViewModel(
                 updateConnection(profileId) { it.copy(skills = parseSkills(json)) }
             }
 
+            "tools" -> {
+                val tools = parseTools(json)
+                updateConnection(profileId) { it.copy(tools = tools) }
+                _uiState.update { it.copy(tools = tools) }
+            }
+
             "skillInvoked" -> {
                 val success = json.optBoolean("success")
                 val error = json.optString("error").takeIf { it.isNotEmpty() }
@@ -900,6 +907,7 @@ class CopilotViewModel(
                 extensions = activeConn?.extensions ?: emptyList(),
                 mcpServers = activeConn?.mcpServers ?: emptyList(),
                 skills = activeConn?.skills ?: emptyList(),
+                tools = activeConn?.tools ?: emptyList(),
                 workspaceInfo = activeConn?.workspaceInfo,
                 chatSessions = activeConn?.chatSessions ?: emptyList(),
                 activeChatSessionId = activeConn?.activeChatSessionId ?: "",
@@ -1081,6 +1089,7 @@ class CopilotViewModel(
                     extensions = emptyList(),
                     mcpServers = emptyList(),
                     skills = emptyList(),
+                    tools = emptyList(),
                     workspaceInfo = null,
                     nativeChatSessions = emptyList(),
                     activeNativeChatSessionId = "",
@@ -1471,6 +1480,16 @@ class CopilotViewModel(
     fun refreshExtensions() = refreshCommand("listExtensions", "extensions", "扩展列表已刷新")
     fun refreshMcpServers() = refreshCommand("listMcpServers", "mcpServers", "MCP 服务已刷新")
     fun refreshSkills() = sendViaActiveConnection(buildJsonCommand("listSkills") {})
+    fun refreshTools() = sendViaActiveConnection(buildJsonCommand("listTools") {})
+    fun toggleTool(id: String) {
+        val current = _uiState.value.enabledTools ?: _uiState.value.tools.map { it.id }.toSet()
+        selectEnabledTools(if (id in current) current - id else current + id)
+    }
+    fun setTools(ids: Set<String>, enabled: Boolean) {
+        val current = _uiState.value.enabledTools ?: _uiState.value.tools.map { it.id }.toSet()
+        selectEnabledTools(if (enabled) current + ids else current - ids)
+    }
+    fun resetTools() = selectEnabledTools(null)
     fun refreshTerminals() = sendViaActiveConnection(buildJsonCommand("listTerminals") {})
 
     fun createTerminal(name: String) = sendViaActiveConnection(buildJsonCommand("createTerminal") {
@@ -1652,6 +1671,7 @@ class CopilotViewModel(
         sendViaConnection(profileId, buildJsonCommand("listExtensions") {})
         sendViaConnection(profileId, buildJsonCommand("listMcpServers") {})
         sendViaConnection(profileId, buildJsonCommand("listSkills") {})
+        sendViaConnection(profileId, buildJsonCommand("listTools") {})
         sendViaConnection(profileId, buildJsonCommand("listTerminals") {})
         sendViaConnection(profileId, buildJsonCommand("getWorkspaceInfo") {})
         sendViaConnection(profileId, buildJsonCommand("getStatus") {})

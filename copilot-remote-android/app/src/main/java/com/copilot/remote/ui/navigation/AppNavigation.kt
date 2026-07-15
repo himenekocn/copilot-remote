@@ -37,6 +37,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Models : Screen("models", "模型", Icons.Default.Psychology)
     data object Agents : Screen("agents", "智能体", Icons.Default.SmartToy)
     data object Skills : Screen("skills", "技能", Icons.Default.AutoAwesome)
+    data object Tools : Screen("tools", "工具", Icons.Default.Handyman)
     data object Commands : Screen("commands", "命令", Icons.Default.Code)
     data object Extensions : Screen("extensions", "扩展", Icons.Default.Extension)
     data object Mcp : Screen("mcp", "MCP", Icons.Default.Hub)
@@ -44,7 +45,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Settings : Screen("settings", "设置与账户", Icons.Default.Settings)
 }
 
-private val screens = listOf(Screen.Chat, Screen.Explorer, Screen.Workspace, Screen.Terminal, Screen.Git, Screen.Models, Screen.Agents, Screen.Skills, Screen.Commands, Screen.Extensions, Screen.Mcp, Screen.Capture, Screen.Settings)
+private val screens = listOf(Screen.Chat, Screen.Explorer, Screen.Workspace, Screen.Terminal, Screen.Git, Screen.Models, Screen.Agents, Screen.Skills, Screen.Tools, Screen.Commands, Screen.Extensions, Screen.Mcp, Screen.Capture, Screen.Settings)
 
 @Composable
 fun AppNavigation(viewModel: CopilotViewModel) {
@@ -91,6 +92,7 @@ fun AppNavigation(viewModel: CopilotViewModel) {
                 composable(Screen.Models.route) { ModelsScreen(viewModel) }
                 composable(Screen.Agents.route) { AgentsScreen(viewModel) }
                 composable(Screen.Skills.route) { SkillsScreen(viewModel) }
+                composable(Screen.Tools.route) { ToolsScreen(viewModel) }
                 composable(Screen.Commands.route) { CommandsScreen(viewModel) }
                 composable(Screen.Extensions.route) { ExtensionsScreen(viewModel) }
                 composable(Screen.Mcp.route) { McpScreen(viewModel) }
@@ -138,7 +140,7 @@ private fun ChatSidebar(viewModel: CopilotViewModel, state: CopilotUiState, rout
         SidebarItem("更多", Icons.Default.MoreHoriz, showMore) { showMore = !showMore }
         AnimatedVisibility(showMore) {
             Column(Modifier.padding(start = 12.dp)) {
-                listOf(Screen.Terminal, Screen.Git, Screen.Models, Screen.Agents, Screen.Skills, Screen.Commands, Screen.Mcp, Screen.Capture).forEach { screen ->
+                listOf(Screen.Terminal, Screen.Git, Screen.Models, Screen.Agents, Screen.Skills, Screen.Tools, Screen.Commands, Screen.Mcp, Screen.Capture).forEach { screen ->
                     SidebarItem(screen.title, screen.icon, route == screen.route) { navigate(screen) }
                 }
             }

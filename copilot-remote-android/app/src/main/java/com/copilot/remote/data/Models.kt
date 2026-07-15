@@ -169,6 +169,15 @@ data class SkillInfo(
     val sourceLabel: String,
 )
 
+data class ToolInfo(
+    val id: String,
+    val name: String,
+    val description: String,
+    val groupId: String,
+    val groupName: String,
+    val source: String,
+)
+
 // ─── Workspace ────────────────────────────────────────────────
 
 data class EditorInfo(
@@ -276,6 +285,7 @@ data class Connection(
     val extensions: List<ExtensionInfo> = emptyList(),
     val mcpServers: List<McpServerInfo> = emptyList(),
     val skills: List<SkillInfo> = emptyList(),
+    val tools: List<ToolInfo> = emptyList(),
     val workspaceInfo: WorkspaceInfo? = null,
     val chatSessions: List<ChatSession> = emptyList(),
     val activeChatSessionId: String = "",
@@ -425,6 +435,14 @@ fun parseSkills(json: JSONObject): List<SkillInfo> {
             source = s.optString("source", "user"),
             sourceLabel = s.optString("sourceLabel"),
         )
+    }
+}
+
+fun parseTools(json: JSONObject): List<ToolInfo> {
+    val arr = json.optJSONArray("tools") ?: return emptyList()
+    return (0 until arr.length()).map { i ->
+        val tool = arr.getJSONObject(i)
+        ToolInfo(tool.optString("id"), tool.optString("name"), tool.optString("description"), tool.optString("groupId"), tool.optString("groupName"), tool.optString("source"))
     }
 }
 

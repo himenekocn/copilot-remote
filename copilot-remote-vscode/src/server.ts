@@ -375,6 +375,10 @@ export class CopilotRemoteServer {
         await this.handleListSkills(ws);
         break;
 
+      case 'listTools':
+        this.send(ws, { type: 'tools', tools: await this.copilotApi.listTools() });
+        break;
+
       case 'invokeSkill':
         await this.handleInvokeSkill(ws, message.skillId, message.args);
         break;
