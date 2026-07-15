@@ -817,13 +817,97 @@ export class CopilotApi {
   }
 
   async listSlashCommands(): Promise<SlashCommandInfo[]> {
-    const builtIn: SlashCommandInfo[] = [
+    const commands: SlashCommandInfo[] = [];
+    const add = (name: unknown, description: unknown, source: string) => {
+      if (typeof name !== 'string') return;
+      const normalizedName = name.trim().replace(/^\/+/, '').replace(/\s+/g, '-');
+      if (!normalizedName || normalizedName.includes('/')) return;
+      const normalizedDescription = typeof description === 'string' && !/^%[^%]+%$/.test(description)
+        ? description.trim()
+        : '';
+      commands.push({ name: normalizedName, description: normalizedDescription, source });
+    };
+
+    for (const [name, description] of [
       ['compact', '压缩当前对话上下文'], ['explain', '解释选中或当前代码'], ['fix', '分析并修复问题'],
       ['new', '创建新项目或文件'], ['setupTests', '配置测试框架'], ['tests', '为代码生成测试'],
-    ].map(([name, description]) => ({ name, description, source: 'Copilot' }));
+    ]) add(name, description, 'Copilot');
+
+    // Read contribution points directly. listParticipants intentionally only
+    // exposes the mode picker, while slash commands also come from hidden chat
+    // participants, chat sessions, prompt files and language-model tools.
+    for (const extension of vscode.extensions.all) {
+      const pkg = extension.packageJSON;
+      const contributes = pkg?.contributes || {};
+      const extensionName = String(pkg?.displayName || pkg?.name || extension.id);
+
+      for (const participant of Array.isArray(contributes.chatParticipants) ? contributes.chatParticipants : []) {
+        const participantName = String(participant?.fullName || participant?.name || extensionName);
+        for (const command of Array.isArray(participant?.commands) ? participant.commands : []) {
+          add(command?.name, command?.description, `参与者 · ${participantName}`);
+        }
+      }
+
+      for (const session of Array.isArray(contributes.chatSessions) ? contributes.chatSessions : []) {
+        const sessionName = String(session?.displayName || session?.name || extensionName);
+        for (const command of Array.isArray(session?.commands) ? session.commands : []) {
+          add(command?.name, command?.description, `会话 · ${sessionName}`);
+        }
+      }
+
+      for (const prompt of Array.isArray(contributes.chatPromptFiles) ? contributes.chatPromptFiles : []) {
+        if (typeof prompt?.path !== 'string') continue;
+        const name = path.basename(prompt.path).replace(/\.prompt\.md$/i, '').replace(/\.md$/i, '');
+        add(name, prompt.description || '运行扩展提供的提示文件', `提示 · ${extensionName}`);
+      }
+
+      for (const tool of Array.isArray(contributes.languageModelTools) ? contributes.languageModelTools : []) {
+        // toolReferenceName is the name users can type after '/' in VS Code.
+        if (typeof tool?.toolReferenceName === 'string') {
+          add(tool.toolReferenceName, tool.description, `工具 · ${extensionName}`);
+        }
+      }
+    }
+
     const participants = await this.listParticipants();
-    const commands = participants.flatMap(participant => participant.commands.map(command => ({ name: command.name.replace(/^\//, ''), description: command.description, source: participant.fullName || participant.name })));
-    return [...builtIn, ...commands].filter((command, index, all) => all.findIndex(item => item.name.toLowerCase() === command.name.toLowerCase()) === index).sort((a, b) => a.name.localeCompare(b.name));
+    for (const participant of participants) {
+      for (const command of participant.commands) {
+        add(command.name, command.description, `参与者 · ${participant.fullName || participant.name}`);
+      }
+    }
+
+    for (const skill of await this.listSkills()) {
+      add(skill.name, skill.description, `技能 · ${skill.sourceLabel || (skill.source === 'user' ? '用户' : '扩展')}`);
+    }
+
+    // Workspace prompt files are dynamic and are not necessarily declared by
+    // an extension manifest. They behave like slash commands in VS Code chat.
+    try {
+      const promptFiles = await vscode.workspace.findFiles('**/*.prompt.md', '**/{node_modules,.git}/**', 200);
+      for (const uri of promptFiles) {
+        add(path.basename(uri.fsPath).replace(/\.prompt\.md$/i, ''), '运行工作区提示文件', '提示 · 工作区');
+      }
+    } catch {
+      // A remote/virtual workspace may not provide a file search provider.
+    }
+
+    // MCP tools are exposed by the runtime and often are not present in an
+    // extension manifest. Match VS Code's /mcp.server.tool style closely.
+    for (const tool of await this.listTools()) {
+      if (tool.source !== 'mcp') continue;
+      const referenceName = tool.name.startsWith('mcp__')
+        ? tool.name.replace(/^mcp__/, 'mcp.').replace(/__/g, '.')
+        : tool.name.replace(/^mcp[_-]/i, 'mcp.');
+      add(referenceName, tool.description, `MCP · ${tool.groupName}`);
+    }
+
+    const unique = new Map<string, SlashCommandInfo>();
+    for (const command of commands) {
+      const key = command.name.toLocaleLowerCase();
+      const existing = unique.get(key);
+      if (!existing || (!existing.description && command.description)) unique.set(key, command);
+    }
+    return [...unique.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ─── Chat Participants (Agents) ─────────────────────────────
