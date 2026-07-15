@@ -144,7 +144,7 @@ export class CopilotApi {
     if (!cleanCommand) throw new Error('Command is empty after removing control characters');
     terminal.show(true);
     const shellIntegration = terminal.shellIntegration || await new Promise<vscode.TerminalShellIntegration | undefined>(resolve => {
-      const timeout = setTimeout(() => { listener.dispose(); resolve(undefined); }, 5000);
+      const timeout = setTimeout(() => { listener.dispose(); resolve(undefined); }, 2_500);
       const listener = vscode.window.onDidChangeTerminalShellIntegration(event => {
         if (event.terminal !== terminal) return;
         clearTimeout(timeout);
@@ -153,42 +153,56 @@ export class CopilotApi {
       });
     });
     if (!shellIntegration) {
-      throw new Error('VS Code terminal shell integration is unavailable. Enable terminal.integrated.shellIntegration.enabled and reopen the terminal.');
+      // Shell integration can remain unavailable for terminals created before
+      // the setting was enabled, remote WSL sessions, and shells with custom
+      // prompt injection. sendText is still the official VS Code input path;
+      // use it as a compatibility fallback instead of rejecting both WSL and
+      // PowerShell. The clipboard capture gives the phone the visible output
+      // even though this terminal cannot provide a structured exit event.
+      terminal.sendText(cleanCommand, true);
+      await new Promise(resolve => setTimeout(resolve, 700));
+      let output = '';
+      try {
+        output = (await this.captureTerminal(terminalId)).content;
+      } catch {
+        // The command was sent successfully; a terminal that does not support
+        // clipboard capture can still be refreshed and attached separately.
+      }
+      return {
+        output: output || '(命令已发送；当前终端未提供 Shell Integration，已回读可见内容)',
+        exitCode: undefined,
+      };
     }
 
-    // sendText uses the terminal's own WSL/SSH/container shell input path.
-    // shellIntegration.executeCommand() injects protocol sequences directly;
-    // some WSL prompts interpret parts of those sequences as '?' commands.
-    let startListener: vscode.Disposable | undefined;
-    let startTimer: NodeJS.Timeout | undefined;
-    const started = new Promise<{ execution: vscode.TerminalShellExecution; end: Promise<number | undefined> }>((resolve, reject) => {
-      startTimer = setTimeout(() => {
-        startListener?.dispose();
-        reject(new Error('The selected terminal did not start the command. Check VS Code shell integration for this WSL/remote shell.'));
-      }, 5000);
-      startListener = vscode.window.onDidStartTerminalShellExecution(event => {
-        if (event.terminal !== terminal) return;
-        if (startTimer) clearTimeout(startTimer);
-        startListener?.dispose();
-        const end = new Promise<number | undefined>(endResolve => {
-          const endListener = vscode.window.onDidEndTerminalShellExecution(endEvent => {
-            if (endEvent.terminal !== terminal || endEvent.execution !== event.execution) return;
-            endListener.dispose();
-            endResolve(endEvent.exitCode);
-          });
+    // executeCommand is important for WSL/SSH terminals: it uses the shell
+    // integration channel and gives us the actual command output. Waiting for
+    // onDidStartTerminalShellExecution after sendText is racy (the event can
+    // be missed for an already initialized WSL shell), which used to leave the
+    // Android client stuck on "正在运行…" indefinitely.
+    const run = async () => {
+      let execution: vscode.TerminalShellExecution;
+      let endListener: vscode.Disposable | undefined;
+      const ended = new Promise<number | undefined>(resolve => {
+        endListener = vscode.window.onDidEndTerminalShellExecution(event => {
+          if (event.terminal !== terminal || event.execution !== execution) return;
+          endListener?.dispose();
+          resolve(event.exitCode);
         });
-        resolve({ execution: event.execution, end });
       });
+      execution = shellIntegration.executeCommand(cleanCommand);
+      let output = '';
+      for await (const chunk of execution.read()) {
+        output += chunk;
+        if (output.length > 8 * 1024 * 1024) output = output.slice(-8 * 1024 * 1024);
+      }
+      const exitCode = await ended;
+      endListener?.dispose();
+      return { output: output || '(command completed with no output)', exitCode };
+    };
+    return await new Promise<{ output: string; exitCode?: number }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('命令执行超时（30 秒），请检查终端是否仍在等待输入。')), 30_000);
+      run().then(result => { clearTimeout(timer); resolve(result); }, error => { clearTimeout(timer); reject(error); });
     });
-    terminal.sendText(cleanCommand, true);
-    const { execution, end } = await started;
-    let output = '';
-    for await (const chunk of execution.read()) {
-      output += chunk;
-      if (output.length > 8 * 1024 * 1024) output = output.slice(-8 * 1024 * 1024);
-    }
-    const exitCode = await end;
-    return { output: output || '(command completed with no output)', exitCode };
   }
 
   private async findTerminal(terminalId: string) {
@@ -839,10 +853,20 @@ export class CopilotApi {
           lower.includes('workbench.action.inline')
         );
       })
-      .map((cmd) => ({
-        id: cmd,
-        isCopilot: cmd.toLowerCase().includes('copilot'),
-      }))
+      .map((cmd) => {
+        const parts = cmd.split('.');
+        const rawTitle = parts[parts.length - 1] || cmd;
+        const title = rawTitle
+          .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+          .replace(/[-_]+/g, ' ')
+          .replace(/^./, value => value.toUpperCase());
+        return {
+          id: cmd,
+          title,
+          category: parts.length > 1 ? parts.slice(0, -1).join('.') : '其他',
+          isCopilot: cmd.toLowerCase().includes('copilot'),
+        };
+      })
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 
@@ -1396,12 +1420,49 @@ export class CopilotApi {
     const extension = vscode.extensions.getExtension('vscode.git');
     if (!extension) throw new Error('Built-in Git extension is unavailable');
     const exports = extension.isActive ? extension.exports : await extension.activate();
-    return exports.getAPI(1).repositories;
+    const api = exports.getAPI(1);
+    const repositories = [...api.repositories];
+    // VS Code may defer opening the workspace-root repository when nested
+    // repositories are discovered first. Explicitly open each workspace root
+    // so the mobile Git page always has the same primary repository as VS Code.
+    for (const folder of vscode.workspace.workspaceFolders || []) {
+      if (repositories.some(repo => path.resolve(repo.rootUri.fsPath) === path.resolve(folder.uri.fsPath))) continue;
+      try {
+        const opened = await api.openRepository(folder.uri) || await vscode.commands.executeCommand<any>('git.openRepository', folder.uri);
+        if (opened && !repositories.some(repo => path.resolve(repo.rootUri.fsPath) === path.resolve(opened.rootUri.fsPath))) repositories.push(opened);
+        // Some Git API versions update `repositories` on the next tick and
+        // return null from openRepository. Pick up that asynchronously opened
+        // root before choosing the default repository.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        for (const repo of api.repositories) {
+          if (!repositories.some(item => path.resolve(item.rootUri.fsPath) === path.resolve(repo.rootUri.fsPath))) repositories.push(repo);
+        }
+      } catch {
+        // A virtual or read-only workspace may not be openable by Git.
+      }
+    }
+    return repositories;
   }
 
   private async gitRepository(repositoryId?: string): Promise<any> {
     const repositories = await this.gitRepositories();
-    const repository = repositoryId ? repositories.find(repo => repo.rootUri.toString() === repositoryId || repo.rootUri.fsPath === repositoryId) : repositories[0];
+    const requested = repositoryId && repositories.find(repo => repo.rootUri.toString() === repositoryId || repo.rootUri.fsPath === repositoryId);
+    const workspaceRoots = (vscode.workspace.workspaceFolders || []).map(folder => path.resolve(folder.uri.fsPath));
+    // The Git extension does not guarantee repository ordering. Prefer the
+    // workspace root (or the repository containing it) instead of accidentally
+    // selecting a nested dependency such as googletest.
+    const preferred = repositories
+      .map(repo => ({ repo, root: path.resolve(repo.rootUri.fsPath) }))
+      .sort((a, b) => {
+        const score = (root: string) => workspaceRoots.reduce((best, workspaceRoot) => {
+          if (root === workspaceRoot) return Math.max(best, 3);
+          if (workspaceRoot.startsWith(`${root}${path.sep}`)) return Math.max(best, 2);
+          if (root.startsWith(`${workspaceRoot}${path.sep}`)) return Math.max(best, 1);
+          return best;
+        }, 0);
+        return score(b.root) - score(a.root) || a.root.length - b.root.length;
+      })[0]?.repo;
+    const repository = requested || preferred || repositories[0];
     if (!repository) throw new Error('No Git repository is open');
     return repository;
   }

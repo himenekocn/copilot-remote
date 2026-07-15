@@ -112,6 +112,8 @@ fun ModelInfo.effectiveReasoningEfforts(): List<String> {
 
 data class CommandInfo(
     val id: String,
+    val title: String = "",
+    val category: String = "",
     val isCopilot: Boolean = false,
 )
 data class SlashCommandInfo(val name: String, val description: String, val source: String)
@@ -368,6 +370,8 @@ fun parseCommands(json: JSONObject): List<CommandInfo> {
         val c = arr.getJSONObject(i)
         CommandInfo(
             id = c.optString("id"),
+            title = c.optString("title"),
+            category = c.optString("category"),
             isCopilot = c.optBoolean("isCopilot"),
         )
     }
@@ -440,10 +444,11 @@ fun parseSkills(json: JSONObject): List<SkillInfo> {
     val arr = json.optJSONArray("skills") ?: return emptyList()
     return (0 until arr.length()).map { i ->
         val s = arr.getJSONObject(i)
+        val description = s.optString("description").trim().let { value -> if (value == "|" || value == ">") "" else value }
         SkillInfo(
             id = s.optString("id"),
             name = s.optString("name"),
-            description = s.optString("description"),
+            description = description,
             source = s.optString("source", "user"),
             sourceLabel = s.optString("sourceLabel"),
         )

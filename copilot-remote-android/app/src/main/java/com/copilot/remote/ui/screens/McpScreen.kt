@@ -29,6 +29,7 @@ import top.yukonga.miuix.kmp.extra.SuperDialog
 fun McpScreen(viewModel: CopilotViewModel) {
     val state by viewModel.uiState.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var pendingRemove by remember { mutableStateOf<McpServerInfo?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refreshMcpServers() }
 
@@ -63,7 +64,7 @@ fun McpScreen(viewModel: CopilotViewModel) {
             items(state.mcpServers) { server ->
                 McpServerCard(
                     server = server,
-                    onRemove = { viewModel.removeMcpServer(server.name) },
+                    onRemove = { pendingRemove = server },
                 )
             }
         }
@@ -77,6 +78,17 @@ fun McpScreen(viewModel: CopilotViewModel) {
             },
             onDismiss = { showAddDialog = false },
         )
+    }
+    pendingRemove?.let { server ->
+        SuperDialog(show = true, title = "移除 MCP 服务器？", onDismissRequest = { pendingRemove = null }) {
+            Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Text("将移除“${server.name}”的配置，此操作不会卸载相关扩展。", color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton("取消", onClick = { pendingRemove = null })
+                    TextButton("移除", onClick = { viewModel.removeMcpServer(server.name); pendingRemove = null }, colors = ButtonDefaults.textButtonColors(textColor = MiuixTheme.colorScheme.error))
+                }
+            }
+        }
     }
 }
 

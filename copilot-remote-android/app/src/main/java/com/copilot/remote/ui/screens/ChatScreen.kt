@@ -6,6 +6,7 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -92,10 +93,14 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
             IconButton(onClick = onOpenNavigation, modifier = Modifier.size(52.dp), backgroundColor = MiuixTheme.colorScheme.surfaceContainer) { Icon(Icons.Default.ArrowBack, "打开导航", modifier = Modifier.size(25.dp)) }
             Surface(Modifier.weight(1f).padding(horizontal = 8.dp), shape = RoundedCornerShape(25.dp), color = MiuixTheme.colorScheme.surfaceContainer) {
                 Column(Modifier.clickable { showSessions = true }.padding(horizontal = 18.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    val activeTitle = state.nativeChatSessions.find { it.id == state.activeNativeChatSessionId }?.title
+                    val storedTitle = state.nativeChatSessions.find { it.id == state.activeNativeChatSessionId }?.title
                         ?: state.chatSessions.find { it.id == state.activeChatSessionId }?.title
+                    val firstUserMessage = state.chatMessages.firstOrNull { it.role == "user" }?.content
+                        ?.lineSequence()?.firstOrNull()?.trim()
+                    val activeTitle = storedTitle?.takeUnless { it.isBlank() || it == "新对话" }
+                        ?: firstUserMessage?.takeIf { it.isNotBlank() }
                         ?: "新对话"
-                    Text(activeTitle.ifBlank { "新对话" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(activeTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(state.connectedWorkspaceName.ifBlank { "Copilot" }, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary, maxLines = 1)
                 }
             }
@@ -380,10 +385,11 @@ private fun AttachmentImage(attachment: ChatAttachment, modifier: Modifier, cont
 
 @Composable
 private fun ChatOptionButton(label: String, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
     Surface(
-        modifier = Modifier.width(104.dp).height(40.dp).clickable(onClick = onClick),
+        modifier = Modifier.width(88.dp).height(40.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
-        color = MiuixTheme.colorScheme.surfaceVariant,
+        color = if (dark) Color(0xFF3A3A3C) else Color(0xFFEBEBED),
     ) {
         Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
             Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -148,7 +148,9 @@ private fun ChatSidebar(viewModel: CopilotViewModel, state: CopilotUiState, rout
             if (state.nativeSessionTotal > 0) Text("${state.nativeChatSessions.size}/${state.nativeSessionTotal}", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
             IconButton(onClick = viewModel::refreshNativeChatSessions, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.Refresh, "刷新全部对话", modifier = Modifier.size(20.dp)) }
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
+        // The connection/profile row is pinned below this list. Keep enough
+        // scroll padding so the final conversation is never hidden behind it.
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 96.dp)) {
             if (remoteSessions.isNotEmpty()) {
                 items(remoteSessions, key = { it.id }) { session ->
                     ConversationItem(conversationTitle(session.title, session.id), session.id == state.activeNativeChatSessionId) {
@@ -194,4 +196,6 @@ private fun ConversationItem(title: String, selected: Boolean, onClick: () -> Un
     }
 }
 
-private fun conversationTitle(title: String, id: String) = title.takeUnless { it.isBlank() || it == id || it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: "未命名对话"
+private fun conversationTitle(title: String, id: String) = title.takeUnless {
+    it.isBlank() || it == id || it == "新对话" || it.matches(Regex("[0-9a-fA-F-]{36}"))
+} ?: "未命名对话"

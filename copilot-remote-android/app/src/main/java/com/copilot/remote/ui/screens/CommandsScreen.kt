@@ -28,7 +28,11 @@ fun CommandsScreen(viewModel: CopilotViewModel) {
 
     val filteredCommands = remember(state.commands, searchQuery) {
         if (searchQuery.isBlank()) state.commands
-        else state.commands.filter { it.id.contains(searchQuery, ignoreCase = true) }
+        else state.commands.filter {
+            it.id.contains(searchQuery, ignoreCase = true) ||
+                it.title.contains(searchQuery, ignoreCase = true) ||
+                it.category.contains(searchQuery, ignoreCase = true)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -85,13 +89,21 @@ private fun CommandCard(
                 modifier = Modifier.size(20.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                command.id,
-                style = MiuixTheme.textStyles.body2,
-                fontFamily = FontFamily.Monospace,
-                fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    command.title.ifBlank { command.id.substringAfterLast('.') },
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+                Text(
+                    command.category.ifBlank { command.id },
+                    style = MiuixTheme.textStyles.footnote2,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    color = MiuixTheme.colorScheme.onSurfaceSecondary,
+                )
+            }
             if (command.isCopilot) {
                 InfoChip("Copilot", containerColor = MiuixTheme.colorScheme.primaryContainer, contentColor = MiuixTheme.colorScheme.onPrimaryContainer)
                 Spacer(modifier = Modifier.width(4.dp))

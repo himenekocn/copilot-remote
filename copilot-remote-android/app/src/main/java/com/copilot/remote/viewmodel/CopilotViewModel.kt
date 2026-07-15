@@ -109,6 +109,9 @@ class CopilotViewModel(
     }
 
     private val TAG = "CopilotViewModel"
+    // A repository selected from the mobile picker is intentionally preserved
+    // across refreshes. A stale id restored from a previous workspace is not.
+    private var gitRepositorySelectedByUser = false
     private val INSTANCE_SCOPED_RESPONSE_TYPES = setOf(
         "models", "status", "workspaceInfo", "openEditors", "chatHistory",
         "activeChatSession", "activeSessionChanged", "todoUpdated", "nativeChatSessions",
@@ -825,6 +828,7 @@ class CopilotViewModel(
                         !oldWorkspace.equals(status.workspaceName, ignoreCase = true)
                     conn.copy(
                         status = status,
+                        gitRepositoryId = if (gitRepositorySelectedByUser) conn.gitRepositoryId else "",
                         nativeChatSessions = if (workspaceChanged) emptyList() else conn.nativeChatSessions,
                         activeNativeChatSessionId = if (workspaceChanged) "" else conn.activeNativeChatSessionId,
                         nativeSessionTotal = if (workspaceChanged) 0 else conn.nativeSessionTotal,
@@ -835,7 +839,10 @@ class CopilotViewModel(
                         chatMessages = if (workspaceChanged && conn.activeNativeChatSessionId.isNotBlank()) emptyList() else conn.chatMessages,
                     )
                 }
-                if (workspaceChanged) requestNativeChatSessions(profileId, 0, withFeedback = false)
+                if (workspaceChanged) {
+                    gitRepositorySelectedByUser = false
+                    requestNativeChatSessions(profileId, 0, withFeedback = false)
+                }
             }
 
             "copilotChatSent" -> {
@@ -1650,7 +1657,7 @@ class CopilotViewModel(
         sendViaConnection(profileId, buildJsonCommand("getGitHistory") { if (repo.isNotBlank()) put("repositoryId", repo) })
         sendViaConnection(profileId, buildJsonCommand("listPullRequests") {})
     }
-    fun selectGitRepository(id: String) { _uiState.update { it.copy(gitRepositoryId = id) }; refreshGit() }
+    fun selectGitRepository(id: String) { gitRepositorySelectedByUser = true; _uiState.update { it.copy(gitRepositoryId = id) }; refreshGit() }
     fun getGitDiff(path: String? = null, commit: String? = null) = sendViaActiveConnection(buildJsonCommand("getGitDiff") { path?.let { put("filePath", it) }; commit?.let { put("commit", it) }; _uiState.value.gitRepositoryId.takeIf(String::isNotBlank)?.let { put("repositoryId", it) } })
     fun checkoutBranch(branch: String) = sendViaActiveConnection(buildJsonCommand("checkoutGitBranch") { put("branch", branch); put("repositoryId", _uiState.value.gitRepositoryId) })
     fun createBranch(branch: String) { if (branch.isNotBlank()) sendViaActiveConnection(buildJsonCommand("createGitBranch") { put("branch", branch); put("checkout", true); put("repositoryId", _uiState.value.gitRepositoryId) }) }
