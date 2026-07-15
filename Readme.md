@@ -1,248 +1,170 @@
-# Copilot Remote Control
+# Copilot Remote
 
-通过手机远程操控 VS Code 中 GitHub Copilot 的完整解决方案。包含一个 VS Code 扩展（WebSocket 服务端）和一个 Android App（远程控制端）。
+[![Build](https://github.com/himenekocn/copilot-remote/actions/workflows/build.yml/badge.svg)](https://github.com/himenekocn/copilot-remote/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/himenekocn/copilot-remote)](https://github.com/himenekocn/copilot-remote/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 架构概览
+通过 Android 手机或平板远程使用 VS Code 中的 GitHub Copilot Chat。项目由 VS Code WebSocket 扩展、Miuix Android 客户端，以及可选的 Copilot Chat Remote Bridge 补丁组成。
 
-```
-┌─────────────────┐         WebSocket (LAN)        ┌──────────────────┐
-│   Android App   │  <──────────────────────────>  │  VS Code 扩展     │
-│  (Remote Control)│     ws://IP:9876 + Key        │  (WS Server)     │
-│                 │                                │                  │
-│  - Chat 对话     │                                │  - Copilot API   │
-│  - Model 选择    │                                │  - vscode.lm     │
-│  - Agent 选择    │                                │  - Commands      │
-│  - Skills 管理   │                                │  - Extensions    │
-│  - 插件管理      │                                │  - MCP Servers   │
-│  - MCP 管理      │                                │  - Workspace     │
-│  - Commands      │                                │                  │
-│  - Workspace    │                                │  GitHub Copilot  │
-└─────────────────┘                                └──────────────────┘
-```
+> [!IMPORTANT]
+> 这是社区维护的非官方项目，与 GitHub、Microsoft 或 OpenAI 没有隶属关系。使用前需要在 VS Code 中安装并登录 GitHub Copilot。
 
-## 功能列表
+## 功能
 
-### VS Code 扩展功能
-- 通过 WebSocket 暴露 Copilot 全部能力
-- Key 认证保护
-- 自动启动 / 手动启动
-- 状态栏显示连接状态
-- QR 码快速连接
-- 局域网访问 (0.0.0.0 绑定)
+- ChatGPT 手机端风格的聊天布局，使用 [Compose Miuix](https://compose-miuix-ui.github.io/miuix/zh_CN/) 实现
+- 手机单栏布局与平板自适应布局
+- Copilot 流式回复、思考过程折叠、工具调用聚合与取消生成
+- 模型、Agent 和思考强度选择，包含最大思考模式
+- 查看当前工作区的全部历史对话，切换 VS Code 项目时自动隔离和刷新
+- 多 VS Code 窗口/工作区发现与切换
+- 文件浏览与编辑、终端、命令、Git、Pull Request、扩展、MCP 和 Skills 管理
+- 窗口截图与短时录屏
+- 多服务器配置、自动重连和可选 FCM 通知
+- GitHub Actions 自动构建 Android APK 与 VS Code VSIX
 
-### Android App 功能
-- **实时对话**: 流式输出 Copilot 回复，支持取消
-- **模型选择**: 列出并选择所有可用 AI 模型 (GPT-4o, Claude, o1 等)
-- **Agent 选择**: 选择 @workspace, @vscode, @terminal, @github 等 Participants
-- **Skills 管理**: 查看/调用 Copilot 技能 (Explain, Fix, Tests, Docs 等)
-- **插件管理**: 列出/启用/禁用 VS Code 扩展
-- **MCP 管理**: 添加/删除/查看 MCP Server 配置
-- **Commands**: 搜索/执行 VS Code 命令
-- **Workspace**: 查看工作区、打开的文件、活跃编辑器
-- **设置持久化**: WS URL 和 Key 自动保存，App 重启自动连接
-- **现代化 UI**: Material 3 设计，深色/浅色主题自适应
+## 架构
 
-## 项目结构
-
-```
-copilot-remote/
-├── copilot-remote-vscode/          # VS Code 扩展
-│   ├── package.json                # 扩展清单
-│   ├── tsconfig.json
-│   ├── esbuild.js                  # 打包配置
-│   ├── .vscodeignore
-│   └── src/
-│       ├── extension.ts            # 入口：命令注册、自动启动
-│       ├── server.ts               # WebSocket 服务端
-│       ├── copilot-api.ts          # Copilot API 封装
-│       └── types.ts                # 共享类型定义
-│
-├── copilot-remote-android/         # Android App
-│   ├── build.gradle.kts            # 根构建配置
-│   ├── settings.gradle.kts
-│   ├── gradle.properties
-│   ├── app/
-│   │   ├── build.gradle.kts        # App 模块配置
-│   │   ├── proguard-rules.pro
-│   │   └── src/main/
-│   │       ├── AndroidManifest.xml
-│   │       ├── java/com/copilot/remote/
-│   │       │   ├── CopilotApplication.kt
-│   │       │   ├── MainActivity.kt
-│   │       │   ├── data/
-│   │       │   │   ├── Models.kt           # 数据模型 + JSON 解析
-│   │       │   │   ├── SettingsStore.kt    # DataStore 持久化
-│   │       │   │   └── WebSocketManager.kt # WebSocket 客户端
-│   │       │   ├── viewmodel/
-│   │       │   │   └── CopilotViewModel.kt # 主 ViewModel
-│   │       │   └── ui/
-│   │       │       ├── theme/
-│   │       │       │   ├── Color.kt
-│   │       │       │   ├── Theme.kt
-│   │       │       │   └── Type.kt
-│   │       │       ├── components/
-│   │       │       │   └── CommonComponents.kt
-│   │       │       ├── navigation/
-│   │       │       │   └── AppNavigation.kt
-│   │       │       └── screens/
-│   │       │           ├── ChatScreen.kt
-│   │       │           ├── ModelsScreen.kt
-│   │       │           ├── AgentsScreen.kt
-│   │       │           ├── SkillsScreen.kt
-│   │       │           ├── CommandsScreen.kt
-│   │       │           ├── ExtensionsScreen.kt
-│   │       │           ├── McpScreen.kt
-│   │       │           ├── WorkspaceScreen.kt
-│   │       │           └── SettingsScreen.kt
-│   │       └── res/
-│   │           ├── values/
-│   │           │   ├── strings.xml
-│   │           │   ├── themes.xml
-│   │           │   ├── colors.xml
-│   │           │   └── ic_launcher_background.xml
-│   │           ├── drawable/
-│   │           │   └── ic_launcher_foreground.xml
-│   │           └── mipmap-anydpi-v26/
-│   │               ├── ic_launcher.xml
-│   │               └── ic_launcher_round.xml
-│   └── gradle/wrapper/
-│       └── gradle-wrapper.properties
-│
-└── README.md
+```text
+Android App
+  │
+  │ WebSocket + shared key
+  ▼
+Copilot Remote VS Code Extension
+  ├── VS Code Extension/Languages/Commands API
+  ├── GitHub Copilot Chat
+  └── Optional patched Remote Bridge
 ```
 
-## 快速开始
+WebSocket 默认监听 `0.0.0.0:9876`，Android 客户端通过认证密钥连接。多窗口场景下，主扩展实例能够发现并代理其他 VS Code 窗口。
 
-### 第一步：安装 VS Code 扩展
+## 下载
+
+前往 [Releases](https://github.com/himenekocn/copilot-remote/releases/latest) 下载：
+
+- `copilot-remote-android-*.apk`：Android 客户端
+- `copilot-remote-vscode-*.vsix`：VS Code 扩展
+
+最低要求：
+
+- VS Code 1.90 或更高版本
+- 已安装并登录 GitHub Copilot Chat
+- Android 8.0 / API 26 或更高版本
+- 手机与电脑位于同一可信局域网，或通过安全 VPN 互通
+
+## 安装与连接
+
+### 1. 安装 VS Code 扩展
+
+在 VS Code 中运行 `Extensions: Install from VSIX...`，选择 Release 中下载的 VSIX，然后重新加载窗口。
+
+在命令面板运行：
+
+1. `Copilot Remote: Generate New Key`
+2. `Copilot Remote: Start Server`
+3. 可选：`Copilot Remote: Show Connection QR Code`
+
+主要设置：
+
+| 设置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `copilotRemote.key` | 空 | WebSocket 认证密钥，必须设置为强随机值 |
+| `copilotRemote.host` | `0.0.0.0` | 监听地址；仅本机使用可改为 `127.0.0.1` |
+| `copilotRemote.port` | `9876` | WebSocket 服务端口 |
+| `copilotRemote.autoStart` | `true` | VS Code 启动时自动启动服务 |
+| `copilotRemote.patchedCopilotBridge.enabled` | `false` | 是否优先使用可选的 Copilot Chat Remote Bridge |
+
+### 2. 安装 Android 客户端
+
+在设备上安装 Release APK。Android 可能会要求允许安装未知来源应用。
+
+打开 App 后配置：
+
+- 地址：`ws://<电脑局域网 IP>:9876`
+- 密钥：与 `copilotRemote.key` 完全一致
+
+连接成功后，可从侧栏选择 VS Code 实例和当前工作区的历史对话。
+
+## 从源码构建
+
+### VS Code 扩展
+
+需要 Node.js 20 或更高版本：
 
 ```bash
 cd copilot-remote-vscode
-npm install
+npm ci
+npm run compile
 npm run build
+npx @vscode/vsce package
 ```
 
-然后在 VS Code 中：
-1. 按 `F5` 打开扩展开发宿主窗口（或使用 `Extensions: Install from VSIX`）
-2. 或者运行 `npx vsce package` 生成 `.vsix` 文件后安装
+### Android
 
-### 第二步：配置扩展
-
-在 VS Code 设置中搜索 `Copilot Remote`：
-
-| 设置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `copilotRemote.key` | (空) | 认证密钥（必填） |
-| `copilotRemote.port` | 9876 | WebSocket 端口 |
-| `copilotRemote.host` | 0.0.0.0 | 绑定地址（0.0.0.0 = 局域网访问） |
-| `copilotRemote.autoStart` | true | VS Code 启动时自动启动服务 |
-
-**生成密钥**：运行命令 `Copilot Remote: Generate New Key`
-
-**启动服务**：运行命令 `Copilot Remote: Start Server`
-
-**查看 QR 码**：运行命令 `Copilot Remote: Show Connection QR Code`
-
-### 第三步：构建 Android App
+需要 JDK 17 和 Android SDK：
 
 ```bash
 cd copilot-remote-android
-# 使用 Android Studio 打开项目，或命令行构建：
-./gradlew assembleDebug
-# APK 输出: app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleDebug
 ```
 
-### 第四步：连接使用
+Debug APK 位于：
 
-1. 确保 VS Code 和手机在同一局域网
-2. 在 VS Code 中启动 Copilot Remote 服务
-3. 打开 Android App
-4. 在设置页面输入：
-   - **WebSocket URL**: `ws://<电脑IP>:9876`
-   - **Key**: 扩展中设置的密钥
-5. 点击连接，开始远程操控 Copilot！
+```text
+copilot-remote-android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-## WebSocket 协议
+Release 构建不会在源码中保存签名信息。需要通过环境变量提供签名：
 
-### 客户端 → 服务端
+```text
+COPILOT_SIGNING_STORE_FILE
+COPILOT_SIGNING_STORE_PASSWORD
+COPILOT_SIGNING_KEY_ALIAS
+COPILOT_SIGNING_KEY_PASSWORD
+```
 
-| 消息类型 | 说明 |
-|----------|------|
-| `auth` | 认证（发送 key） |
-| `listModels` | 获取可用 AI 模型列表 |
-| `chat` | 发送聊天消息（流式响应） |
-| `cancelChat` | 取消正在进行的聊天 |
-| `listCommands` | 获取 VS Code 命令列表 |
-| `executeCommand` | 执行 VS Code 命令 |
-| `listParticipants` | 获取 Chat Participants (Agents) |
-| `listExtensions` | 获取已安装扩展列表 |
-| `toggleExtension` | 启用/禁用扩展 |
-| `listMcpServers` | 获取 MCP Server 列表 |
-| `addMcpServer` | 添加 MCP Server |
-| `removeMcpServer` | 删除 MCP Server |
-| `listSkills` | 获取 Skills/Tools 列表 |
-| `invokeSkill` | 调用 Skill |
-| `getWorkspaceInfo` | 获取工作区信息 |
-| `getOpenEditors` | 获取打开的编辑器 |
-| `getFileContent` | 读取文件内容 |
-| `saveFileContent` | 保存文件内容 |
-| `getStatus` | 获取服务状态 |
-| `sendToCopilotChat` | 发送消息到 VS Code Copilot Chat 面板 |
-| `getActiveEditorContent` | 获取当前编辑器内容 |
-| `insertText` | 在当前编辑器插入文本 |
-| `ping` | 心跳检测 |
+未提供签名时，Gradle 仍可生成 unsigned release；GitHub Actions 使用仓库 Secrets 生成签名 APK。
 
-### 服务端 → 客户端
+## GitHub Actions
 
-| 消息类型 | 说明 |
-|----------|------|
-| `authResult` | 认证结果 |
-| `models` | 模型列表 |
-| `chatStart` | 聊天开始 |
-| `chatDelta` | 聊天流式片段 |
-| `chatDone` | 聊天完成 |
-| `chatError` | 聊天错误 |
-| `chatCancelled` | 聊天已取消 |
-| `commands` | 命令列表 |
-| `commandResult` | 命令执行结果 |
-| `participants` | Agent 列表 |
-| `extensions` | 扩展列表 |
-| `mcpServers` | MCP Server 列表 |
-| `skills` | Skill 列表 |
-| `workspaceInfo` | 工作区信息 |
-| `status` | 服务状态 |
-| `error` | 错误消息 |
-| `pong` | 心跳响应 |
+[Build workflow](.github/workflows/build.yml) 会在以下场景执行：
 
-## 技术栈
+- 推送到 `main`
+- Pull Request
+- 手动触发 `workflow_dispatch`
 
-### VS Code 扩展
-- TypeScript
-- VS Code Extension API (`vscode.lm`, `vscode.commands`, `vscode.chat`)
-- WebSocket (`ws` library)
-- esbuild 打包
+构建产物包含 Android release APK 与 VS Code VSIX。签名使用以下 GitHub Actions Secrets：
 
-### Android App
-- Kotlin
-- Jetpack Compose (Material 3)
-- OkHttp WebSocket
-- DataStore (偏好设置持久化)
-- MVVM + StateFlow
-- Navigation Compose
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+不要将 JKS、密码、`.env`、`local.properties` 或服务账户 JSON 提交到仓库。
+
+## 项目结构
+
+```text
+.
+├── .github/workflows/          # CI 构建
+├── copilot-remote-android/     # Kotlin + Jetpack Compose + Miuix App
+├── copilot-remote-vscode/      # TypeScript VS Code WebSocket 扩展
+└── vscode-copilot-chat/        # 可选 Remote Bridge 补丁源码
+```
 
 ## 安全说明
 
-- 所有 WebSocket 连接需要 Key 认证
-- 默认绑定 `0.0.0.0` 允许局域网访问，可改为 `127.0.0.1` 仅限本机
-- WebSocket 使用 `ws://`（明文），建议仅在同一可信局域网内使用
-- 如需更高安全性，可在 VS Code 和手机之间使用 VPN 或 SSH 隧道
+- WebSocket 连接必须经过共享密钥认证。
+- `ws://` 不提供传输加密，只应在可信局域网使用。
+- 公网远程访问建议使用 WireGuard、Tailscale 等 VPN，不要直接暴露端口。
+- Firebase 服务账户文件必须存放在仓库外部。
+- Android release 签名库及密码不应提交到 Git。
 
-## 前置条件
+## 已知限制
 
-- VS Code >= 1.90.0
-- GitHub Copilot 扩展已安装并登录
-- Android 设备 >= API 26 (Android 8.0)
-- VS Code 和手机在同一局域网
+- 部分能力依赖当前 VS Code 和 GitHub Copilot Chat 版本，升级后可能需要同步适配。
+- 未启用 Remote Bridge 时，历史对话使用本地 VS Code 会话存储作为回退来源。
+- FCM 推送需要自行配置 Firebase 项目和服务账户。
 
 ## 许可证
 
-MIT License
+本项目采用 [MIT License](LICENSE)。`vscode-copilot-chat` 中保留的第三方源码及资源仍遵循其目录内声明的许可证和版权信息。

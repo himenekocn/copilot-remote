@@ -4,6 +4,11 @@
   "description": "Expose GitHub Copilot's full functionality via WebSocket API for remote control from mobile devices",
   "version": "1.0.14",
   "publisher": "copilot-remote",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/himenekocn/copilot-remote.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
