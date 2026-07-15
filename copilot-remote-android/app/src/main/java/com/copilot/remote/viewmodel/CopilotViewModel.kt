@@ -875,7 +875,7 @@ class CopilotViewModel(
             }
         }
 
-        completePendingFeedback(profileId, effectiveSourceInstanceId, type)
+        completePendingFeedback(profileId, effectiveSourceInstanceId, type, json.optString("error"))
 
         syncUiState()
     }
@@ -1588,6 +1588,12 @@ class CopilotViewModel(
         put("filePath", path); line?.let { put("line", it) }; character?.let { put("character", it) }
     })
 
+    fun openFileInVsCodeWithFeedback(path: String, line: Int? = null, character: Int? = null) = refreshActive { profileId ->
+        sendWithFeedback(profileId, buildJsonCommand("openFile") {
+            put("filePath", path); line?.let { put("line", it) }; character?.let { put("character", it) }
+        }, "fileOpened", "已在 VS Code 中打开 ${path.substringAfterLast('/').substringAfterLast('\\')}")
+    }
+
     fun openEditorFile(path: String, line: Int? = null, character: Int? = null) {
         val activeId = _uiState.value.activeConnectionId
         if (activeId.isBlank()) return
@@ -1615,6 +1621,10 @@ class CopilotViewModel(
         val activeId = _uiState.value.activeConnectionId
         val conn = _connections.value[activeId] ?: return
         if (conn.editorFilePath.isBlank() || conn.editorLoading) return
+        if (conn.editorContent == conn.editorOriginalContent) {
+            showNotice("没有需要保存的更改")
+            return
+        }
         updateConnection(activeId) { it.copy(editorLoading = true) }
         syncUiState()
         if (!sendViaConnection(activeId, buildJsonCommand("saveFileContent") {
@@ -1701,14 +1711,14 @@ class CopilotViewModel(
         return sent
     }
 
-    private fun completePendingFeedback(profileId: String, sourceInstanceId: String, responseType: String) {
+    private fun completePendingFeedback(profileId: String, sourceInstanceId: String, responseType: String, error: String = "") {
         val activeInstanceId = _connections.value[profileId]?.activeInstanceId.orEmpty()
         val key = feedbackKey(profileId, sourceInstanceId.ifBlank { activeInstanceId }, responseType)
         val message = pendingFeedbacks.remove(key)
             ?: pendingFeedbacks.remove(feedbackKey(profileId, activeInstanceId, responseType))
             ?: pendingFeedbacks.remove(feedbackKey(profileId, "", responseType))
             ?: return
-        showNotice(message)
+        showNotice(error.ifBlank { message }, isError = error.isNotBlank())
     }
 
     private fun feedbackKey(profileId: String, instanceId: String, responseType: String) = "$profileId:$instanceId:$responseType"

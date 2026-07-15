@@ -32,7 +32,7 @@ fun ExplorerScreen(viewModel: CopilotViewModel) {
             onContentChange = viewModel::updateEditorContent,
             onSave = viewModel::saveEditorFile,
             onClose = viewModel::closeEditorFile,
-            onOpenInVsCode = { viewModel.openFile(state.editorFilePath) },
+            onOpenInVsCode = { viewModel.openFileInVsCodeWithFeedback(state.editorFilePath) },
         )
         return
     }
@@ -158,7 +158,7 @@ private fun FileEditor(
             IconButton(onClick = onOpenInVsCode, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.OpenInNew, "在 VS Code 中打开", modifier = Modifier.size(22.dp))
             }
-            IconButton(onClick = onSave, enabled = dirty && !loading, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onSave, enabled = !loading, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.Save, "保存", modifier = Modifier.size(22.dp))
             }
         }
