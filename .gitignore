@@ -28,6 +28,8 @@ yarn-error.log*
 **/.kotlin/
 build/
 **/build/
+!vscode-copilot-chat/script/build/
+!vscode-copilot-chat/script/build/**
 local.properties
 **/local.properties
 .navigation/
