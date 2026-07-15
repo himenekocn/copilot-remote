@@ -2,6 +2,7 @@ package com.copilot.remote.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.copilot.remote.data.ChatMessage
@@ -182,8 +184,20 @@ fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
                 CodeBlock(segment.language, segment.text)
             } else {
                 val lines = segment.text.lines()
-                lines.forEach { raw ->
+                var lineIndex = 0
+                while (lineIndex < lines.size) {
+                    val raw = lines[lineIndex]
                     val line = raw.trimEnd()
+                    if (line.contains('|') && lineIndex + 1 < lines.size && isMarkdownTableSeparator(lines[lineIndex + 1])) {
+                        val tableLines = mutableListOf(line, lines[lineIndex + 1])
+                        lineIndex += 2
+                        while (lineIndex < lines.size && lines[lineIndex].contains('|') && lines[lineIndex].isNotBlank()) {
+                            tableLines += lines[lineIndex]
+                            lineIndex++
+                        }
+                        MarkdownTable(tableLines)
+                        continue
+                    }
                     when {
                         line.isBlank() -> Spacer(Modifier.height(2.dp))
                         line.startsWith("### ") -> SelectionContainer { Text(inlineMarkdown(line.removePrefix("### ")), style = MiuixTheme.textStyles.title4, fontWeight = FontWeight.Bold) }
@@ -205,11 +219,51 @@ fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
                         }
                         else -> SelectionContainer { Text(inlineMarkdown(line), style = MiuixTheme.textStyles.body2) }
                     }
+                    lineIndex++
                 }
             }
         }
     }
 }
+
+@Composable
+private fun MarkdownTable(lines: List<String>) {
+    val rows = lines.filterIndexed { index, _ -> index != 1 }.map(::markdownTableCells)
+    val columnCount = rows.maxOfOrNull { it.size } ?: return
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MiuixTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MiuixTheme.colorScheme.dividerLine),
+        modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+    ) {
+        Column {
+            rows.forEachIndexed { rowIndex, cells ->
+                Row {
+                    repeat(columnCount) { columnIndex ->
+                        Box(
+                            Modifier.width(132.dp).padding(horizontal = 9.dp, vertical = 7.dp),
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    inlineMarkdown(cells.getOrElse(columnIndex) { "" }),
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    fontWeight = if (rowIndex == 0) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (rowIndex < rows.lastIndex) HorizontalDivider()
+            }
+        }
+    }
+}
+
+private fun isMarkdownTableSeparator(line: String): Boolean = markdownTableCells(line).let { cells ->
+    cells.isNotEmpty() && cells.all { it.trim().matches(Regex(":?-{3,}:?")) }
+}
+
+private fun markdownTableCells(line: String): List<String> = line.trim().trim('|').split('|').map { it.trim() }
 
 @Composable
 private fun CodeBlock(language: String, code: String) {
@@ -258,6 +312,17 @@ private fun inlineMarkdown(value: String): AnnotatedString = buildAnnotatedStrin
     var index = 0
     while (index < value.length) {
         when {
+            value[index] == '[' -> {
+                val labelEnd = value.indexOf(']', index + 1)
+                val urlStart = if (labelEnd > index && labelEnd + 1 < value.length && value[labelEnd + 1] == '(') labelEnd + 2 else -1
+                val urlEnd = if (urlStart > 0) value.indexOf(')', urlStart) else -1
+                if (urlEnd > urlStart) {
+                    withStyle(SpanStyle(color = androidx.compose.ui.graphics.Color(0xFF3482F6), textDecoration = TextDecoration.Underline)) {
+                        append(value.substring(index + 1, labelEnd))
+                    }
+                    index = urlEnd + 1
+                } else append(value[index++])
+            }
             value.startsWith("**", index) -> {
                 val end = value.indexOf("**", index + 2)
                 if (end > index) {

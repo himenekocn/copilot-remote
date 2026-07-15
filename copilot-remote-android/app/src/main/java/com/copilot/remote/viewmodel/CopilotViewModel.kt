@@ -1701,12 +1701,12 @@ class CopilotViewModel(
     }
 
     private fun upsertProgressMessage(profileId: String, requestId: String, kind: String, label: String, content: String, append: Boolean, idSuffix: String = kind) {
-        val body = content.trim().takeIf { it.isNotBlank() } ?: return
+        if (content.isBlank()) return
         updateConnection(profileId) { conn ->
             val messages = conn.chatMessages.toMutableList()
             val id = "${requestId.ifBlank { "current" }}:$idSuffix"
             val index = messages.indexOfFirst { it.id == id }
-            val next = if (append && index >= 0) messages[index].content + body else body
+            val next = if (append && index >= 0) messages[index].content + content else content
             val message = ChatMessage("assistant", next, id = id, kind = kind, toolName = label)
             if (index >= 0) messages[index] = message else {
                 val streamingIndex = messages.indexOfLast { it.isStreaming }
