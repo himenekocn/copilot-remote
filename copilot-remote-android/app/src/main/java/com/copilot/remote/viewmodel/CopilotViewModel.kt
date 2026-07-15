@@ -1470,7 +1470,7 @@ class CopilotViewModel(
     fun refreshCommands() = refreshCommand("listCommands", "commands", "命令列表已刷新")
     fun refreshExtensions() = refreshCommand("listExtensions", "extensions", "扩展列表已刷新")
     fun refreshMcpServers() = refreshCommand("listMcpServers", "mcpServers", "MCP 服务已刷新")
-    fun refreshSkills() = refreshCommand("listSkills", "skills", "技能列表已刷新")
+    fun refreshSkills() = sendViaActiveConnection(buildJsonCommand("listSkills") {})
     fun refreshTerminals() = refreshCommand("listTerminals", "terminals", "终端列表已刷新")
 
     fun createTerminal(name: String) = sendViaActiveConnection(buildJsonCommand("createTerminal") {

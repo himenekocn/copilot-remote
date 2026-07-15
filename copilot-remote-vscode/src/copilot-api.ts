@@ -979,79 +979,57 @@ export class CopilotApi {
     */
   }
 
-  // ─── Skills / Language Model Tools ──────────────────────────
+  // ─── Agent skills ───────────────────────────────────────────
 
   async listSkills(): Promise<SkillInfo[]> {
-    // Language Model Tools contributed by extensions
     const skills: SkillInfo[] = [];
-
-    for (const tool of vscode.lm.tools) {
-      skills.push({ id: tool.name, name: tool.name, description: tool.description || '', isCopilot: true });
-    }
-
-    for (const ext of vscode.extensions.all) {
-      const pkg = ext.packageJSON;
-      const tools = pkg?.contributes?.languageModelTools;
-      if (tools && Array.isArray(tools)) {
-        for (const tool of tools) {
-          if (!skills.some((skill) => skill.id === (tool.id || tool.name))) skills.push({
-            id: tool.id || tool.name,
-            name: tool.name || tool.id,
-            description: tool.description || '',
-            isCopilot: ext.id.toLowerCase().includes('copilot'),
-          });
+    const addSkill = async (filePath: string, source: SkillInfo['source'], sourceLabel?: string) => {
+      try {
+        const stat = await fs.stat(filePath);
+        const skillFile = stat.isDirectory() ? path.join(filePath, 'SKILL.md') : filePath;
+        const content = await fs.readFile(skillFile, 'utf8');
+        const fallbackName = path.basename(path.dirname(skillFile));
+        const metadata = this._readSkillMetadata(content, fallbackName);
+        const id = `${source}:${sourceLabel || 'local'}:${metadata.name}`;
+        if (!skills.some(skill => skill.source === source && skill.name === metadata.name && skill.sourceLabel === sourceLabel)) {
+          skills.push({ id, name: metadata.name, description: metadata.description, source, sourceLabel });
         }
+      } catch {
+        // Contributions may be disabled, conditional, or missing on disk.
       }
-    }
+    };
 
-    // Also include Copilot-specific tools/skills from commands
-    const commands = await vscode.commands.getCommands(true);
-    const copilotToolCommands = commands.filter(
-      (c) => c.includes('copilot.chat.') && (c.includes('tool') || c.includes('skill')),
-    );
-    for (const cmd of copilotToolCommands) {
-      const name = cmd.split('.').pop() || cmd;
-      skills.push({
-        id: cmd,
-        name,
-        description: `Copilot tool: ${name}`,
-        isCopilot: true,
-      });
-    }
-
-    // Built-in Copilot skills
-    const builtInSkills = [
-      { id: 'copilot.explain', name: 'Explain', description: 'Explain the selected code', isCopilot: true },
-      { id: 'copilot.fix', name: 'Fix', description: 'Fix bugs in the selected code', isCopilot: true },
-      { id: 'copilot.tests', name: 'Tests', description: 'Generate tests for the selected code', isCopilot: true },
-      { id: 'copilot.docs', name: 'Docs', description: 'Generate documentation', isCopilot: true },
-      { id: 'copilot.refactor', name: 'Refactor', description: 'Refactor the selected code', isCopilot: true },
-      { id: 'copilot.optimize', name: 'Optimize', description: 'Optimize the selected code', isCopilot: true },
-    ];
-
-    for (const skill of builtInSkills) {
-      if (!skills.find((s) => s.id === skill.id)) {
-        skills.push(skill);
-      }
-    }
-
-    for (const root of [path.join(os.homedir(), '.agents', 'skills'), path.join(os.homedir(), '.copilot', 'skills')]) {
+    for (const root of [path.join(os.homedir(), '.agents', 'skills'), path.join(os.homedir(), '.copilot', 'skills'), path.join(os.homedir(), '.codex', 'skills')]) {
       try {
         for (const entry of await fs.readdir(root, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const content = await fs.readFile(path.join(root, entry.name, 'SKILL.md'), 'utf8');
-          const name = content.match(/^name:\s*(.+)$/m)?.[1]?.trim() || entry.name;
-          const description = content.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
-          if (!skills.some((skill) => skill.id === entry.name)) {
-            skills.push({ id: entry.name, name, description, isCopilot: false });
-          }
+          if (entry.isDirectory()) await addSkill(path.join(root, entry.name), 'user');
         }
       } catch {
         // User skill directories are optional.
       }
     }
 
-    return skills;
+    for (const extension of vscode.extensions.all) {
+      const contributions = extension.packageJSON?.contributes?.chatSkills;
+      if (!Array.isArray(contributions)) continue;
+      const label = String(extension.packageJSON?.displayName || extension.packageJSON?.name || extension.id);
+      for (const contribution of contributions) {
+        if (typeof contribution?.path !== 'string') continue;
+        await addSkill(path.resolve(extension.extensionPath, contribution.path), 'extension', label);
+      }
+    }
+
+    return skills.sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name));
+  }
+
+  private _readSkillMetadata(content: string, fallbackName: string): { name: string; description: string } {
+    const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/)?.[1] || content;
+    const clean = (value: string) => value.trim().replace(/^['"]|['"]$/g, '');
+    const name = clean(frontmatter.match(/^name:\s*(.+)$/m)?.[1] || fallbackName);
+    const inlineDescription = frontmatter.match(/^description:\s*([^>|].*)$/m)?.[1];
+    const blockDescription = frontmatter.match(/^description:\s*[>|][-+]?\s*\r?\n((?:[ \t]+.*(?:\r?\n|$))+)/m)?.[1]
+      ?.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join(' ');
+    return { name, description: clean(inlineDescription || blockDescription || '') };
   }
 
   async invokeSkill(

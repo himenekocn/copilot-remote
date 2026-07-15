@@ -146,7 +146,8 @@ export interface SkillInfo {
   id: string;
   name: string;
   description: string;
-  isCopilot?: boolean;
+  source: 'user' | 'extension';
+  sourceLabel?: string;
 }
 
 // ─── Workspace Types ────────────────────────────────────────

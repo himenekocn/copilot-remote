@@ -155,7 +155,8 @@ data class SkillInfo(
     val id: String,
     val name: String,
     val description: String,
-    val isCopilot: Boolean,
+    val source: String,
+    val sourceLabel: String,
 )
 
 // ─── Workspace ────────────────────────────────────────────────
@@ -411,7 +412,8 @@ fun parseSkills(json: JSONObject): List<SkillInfo> {
             id = s.optString("id"),
             name = s.optString("name"),
             description = s.optString("description"),
-            isCopilot = s.optBoolean("isCopilot"),
+            source = s.optString("source", "user"),
+            sourceLabel = s.optString("sourceLabel"),
         )
     }
 }
