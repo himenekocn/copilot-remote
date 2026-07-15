@@ -102,6 +102,16 @@ data class ModelInfo(
     val reasoningEfforts: List<String> = emptyList(),
 )
 
+fun ModelInfo.effectiveReasoningEfforts(): List<String> {
+    val key = "$id $name $family".lowercase()
+    val inferred = Regex("(?:oaicopilot|gpt-[5-9]|claude|gemini|deepseek|qwen|qwq|glm|kimi|minimax|mimo|grok|magistral|reasoning|thinking|\\bo[134](?:\\b|-)|\\br1(?:\\b|-))")
+        .containsMatchIn(key)
+    val efforts = reasoningEfforts.ifEmpty {
+        if (inferred) listOf("none", "low", "medium", "high", "xhigh") else emptyList()
+    }
+    return if ("gpt-5" in key && "max" !in efforts) efforts + "max" else efforts
+}
+
 // ─── Commands ─────────────────────────────────────────────────
 
 data class CommandInfo(

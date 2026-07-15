@@ -176,10 +176,15 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 				const endpoints = await this._endpointProvider.getAllChatEndpoints();
 				this._sendJson(res, 200, {
 					models: models.map(model => {
-						const endpoint = endpoints.find(item => item.model === model.id || item.family === model.family);
+						const normalize = (value: string | undefined) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+						const modelKeys = [model.id, model.name, model.family].map(normalize).filter(Boolean);
+						const endpoint = endpoints.find(item => {
+							const endpointKeys = [item.model, item.name, item.family].map(normalize).filter(Boolean);
+							return endpointKeys.some(key => modelKeys.includes(key));
+						});
 						const declaredEfforts = endpoint?.supportsReasoningEffort || [];
 						const modelKey = `${model.id} ${model.name} ${model.family}`.toLowerCase();
-						const fallbackEfforts = /(?:gpt-5|claude|\bo[134](?:\b|-))/.test(modelKey)
+						const fallbackEfforts = /(?:oaicopilot|gpt-[5-9]|claude|gemini|deepseek|qwen|qwq|glm|kimi|minimax|mimo|grok|magistral|reasoning|thinking|\bo[134](?:\b|-)|\br1(?:\b|-))/.test(modelKey)
 							? ['none', 'low', 'medium', 'high', 'xhigh']
 							: [];
 						return {
@@ -370,7 +375,8 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		}
 		const modelId = typeof body.modelId === 'string' && body.modelId ? body.modelId : undefined;
 		const participant = typeof body.participant === 'string' && body.participant.trim() ? body.participant.trim() : undefined;
-		const reasoningEffort = typeof body.reasoningEffort === 'string' && body.reasoningEffort ? body.reasoningEffort : undefined;
+		const rawReasoningEffort = typeof body.reasoningEffort === 'string' && body.reasoningEffort ? body.reasoningEffort : undefined;
+		const reasoningEffort = rawReasoningEffort === 'max' ? 'xhigh' : rawReasoningEffort;
 		const permissionLevel = body.permissionLevel === 'autoApprove' || body.permissionLevel === 'autopilot' ? body.permissionLevel : undefined;
 		const enabledTools = Array.isArray(body.enabledTools) ? body.enabledTools.filter((tool): tool is string => typeof tool === 'string') : undefined;
 		const models = modelId ? await vscode.lm.selectChatModels({ id: modelId }) : [];

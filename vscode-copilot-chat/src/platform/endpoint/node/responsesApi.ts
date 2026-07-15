@@ -74,9 +74,10 @@ export function createResponsesRequestBody(accessor: ServicesAccessor, options: 
 	const summaryConfig = configService.getExperimentBasedConfig(ConfigKey.ResponsesApiReasoningSummary, expService);
 	const shouldDisableReasoningSummary = endpoint.family === 'gpt-5.3-codex-spark-preview';
 	const effortFromSetting = configService.getConfig(ConfigKey.TeamInternal.ResponsesApiReasoningEffort);
-	const effort = endpoint.supportsReasoningEffort?.length
-		? (effortFromSetting || options.reasoningEffort || 'medium')
-		: undefined;
+	// Remote/custom providers do not always publish reasoning_effort metadata even
+	// when their OpenAI-compatible endpoint supports it. An explicit per-request
+	// choice is authoritative; metadata still controls the normal default.
+	const effort = effortFromSetting || options.reasoningEffort || (endpoint.supportsReasoningEffort?.length ? 'medium' : undefined);
 	const summary = summaryConfig === 'off' || shouldDisableReasoningSummary ? undefined : summaryConfig;
 	if (effort || summary) {
 		body.reasoning = {

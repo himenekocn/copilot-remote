@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.copilot.remote.data.ChatAttachment
 import com.copilot.remote.data.ChatMessage
 import com.copilot.remote.data.ModelInfo
+import com.copilot.remote.data.effectiveReasoningEfforts
 import com.copilot.remote.viewmodel.CopilotViewModel
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.extra.SuperDialog
@@ -268,12 +269,7 @@ private fun MessageContent(message: ChatMessage, onRetry: () -> Unit) {
 }
 
 private fun effectiveReasoningEfforts(model: ModelInfo?): List<String> {
-    if (model == null) return emptyList()
-    val key = "${model.id} ${model.name} ${model.family}".lowercase()
-    val efforts = model.reasoningEfforts.ifEmpty {
-        if (Regex("(?:gpt-5|claude|\\bo[134](?:\\b|-))").containsMatchIn(key)) listOf("none", "low", "medium", "high", "xhigh") else emptyList()
-    }
-    return if ("gpt-5" in key && "max" !in efforts) efforts + "max" else efforts
+    return model?.effectiveReasoningEfforts().orEmpty()
 }
 
 private fun reasoningEffortLabel(value: String) = when (value.lowercase()) {

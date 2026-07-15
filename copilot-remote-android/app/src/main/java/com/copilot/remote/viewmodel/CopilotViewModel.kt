@@ -1355,7 +1355,7 @@ class CopilotViewModel(
 
     fun selectModel(modelId: String) {
         val model = _uiState.value.models.find { it.id == modelId }
-        val effort = _uiState.value.selectedReasoningEffort.takeIf { model?.reasoningEfforts?.contains(it) == true } ?: ""
+        val effort = _uiState.value.selectedReasoningEffort.takeIf { model?.effectiveReasoningEfforts()?.contains(it) == true } ?: ""
         _uiState.update { it.copy(selectedModelId = modelId, selectedReasoningEffort = effort) }
         viewModelScope.launch {
             settingsStore.updateSelectedModel(modelId)
