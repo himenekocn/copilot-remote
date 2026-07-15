@@ -29,6 +29,8 @@ import type {
 export class CopilotApi {
   private chatHistory: ChatHistoryItem[] = [];
   private cachedModels: ModelInfo[] = [];
+  private readonly terminalIds = new WeakMap<vscode.Terminal, string>();
+  private nextTerminalId = 1;
 
   async listTools(): Promise<ToolInfo[]> {
     const contributionOwners = new Map<string, { id: string; name: string }>();
@@ -83,14 +85,24 @@ export class CopilotApi {
 
   private async terminalInfo(terminal: vscode.Terminal) {
     const processId = await terminal.processId;
-    return { id: String(processId ?? vscode.window.terminals.indexOf(terminal)), name: terminal.name, processId, isActive: vscode.window.activeTerminal === terminal };
+    let id = this.terminalIds.get(terminal);
+    if (!id) {
+      id = `terminal-${this.nextTerminalId++}`;
+      this.terminalIds.set(terminal, id);
+    }
+    return { id, name: terminal.name, processId, isActive: vscode.window.activeTerminal === terminal };
   }
 
   async listTerminals() {
     const visibleTerminals = vscode.window.terminals.filter(terminal =>
-      terminal === vscode.window.activeTerminal || terminal.state.isInteractedWith,
+      (terminal.creationOptions as vscode.TerminalOptions).hideFromUser !== true &&
+      (terminal === vscode.window.activeTerminal || terminal.state.isInteractedWith),
     );
-    return Promise.all(visibleTerminals.map((terminal) => this.terminalInfo(terminal)));
+    const terminals = await Promise.all(visibleTerminals.map((terminal) => this.terminalInfo(terminal)));
+    // Proxy refreshes can overlap while a shell is starting. Stable IDs plus
+    // this final de-duplication prevent the same terminal appearing twice.
+    return [...new Map(terminals.map(terminal => [terminal.id, terminal])).values()]
+      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
   }
 
   async createTerminal(name = 'Copilot Remote', cwd?: string) {
@@ -125,6 +137,11 @@ export class CopilotApi {
   async executeTerminal(terminalId: string, command: string) {
     const terminal = await this.findTerminal(terminalId);
     if (!terminal) throw new Error(`Terminal not found: ${terminalId}`);
+    const cleanCommand = command
+      .replace(/\r\n?/g, '\n')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .trim();
+    if (!cleanCommand) throw new Error('Command is empty after removing control characters');
     terminal.show(true);
     const shellIntegration = terminal.shellIntegration || await new Promise<vscode.TerminalShellIntegration | undefined>(resolve => {
       const timeout = setTimeout(() => { listener.dispose(); resolve(undefined); }, 5000);
@@ -139,15 +156,32 @@ export class CopilotApi {
       throw new Error('VS Code terminal shell integration is unavailable. Enable terminal.integrated.shellIntegration.enabled and reopen the terminal.');
     }
 
-    let execution: vscode.TerminalShellExecution;
-    const end = new Promise<number | undefined>(resolve => {
-      const listener = vscode.window.onDidEndTerminalShellExecution(event => {
-        if (event.terminal !== terminal || event.execution !== execution) return;
-        listener.dispose();
-        resolve(event.exitCode);
+    // sendText uses the terminal's own WSL/SSH/container shell input path.
+    // shellIntegration.executeCommand() injects protocol sequences directly;
+    // some WSL prompts interpret parts of those sequences as '?' commands.
+    let startListener: vscode.Disposable | undefined;
+    let startTimer: NodeJS.Timeout | undefined;
+    const started = new Promise<{ execution: vscode.TerminalShellExecution; end: Promise<number | undefined> }>((resolve, reject) => {
+      startTimer = setTimeout(() => {
+        startListener?.dispose();
+        reject(new Error('The selected terminal did not start the command. Check VS Code shell integration for this WSL/remote shell.'));
+      }, 5000);
+      startListener = vscode.window.onDidStartTerminalShellExecution(event => {
+        if (event.terminal !== terminal) return;
+        if (startTimer) clearTimeout(startTimer);
+        startListener?.dispose();
+        const end = new Promise<number | undefined>(endResolve => {
+          const endListener = vscode.window.onDidEndTerminalShellExecution(endEvent => {
+            if (endEvent.terminal !== terminal || endEvent.execution !== event.execution) return;
+            endListener.dispose();
+            endResolve(endEvent.exitCode);
+          });
+        });
+        resolve({ execution: event.execution, end });
       });
     });
-    execution = shellIntegration.executeCommand(command);
+    terminal.sendText(cleanCommand, true);
+    const { execution, end } = await started;
     let output = '';
     for await (const chunk of execution.read()) {
       output += chunk;
@@ -159,7 +193,7 @@ export class CopilotApi {
 
   private async findTerminal(terminalId: string) {
     for (const terminal of vscode.window.terminals) {
-      if ((await this.terminalInfo(terminal)).id === terminalId) return terminal;
+      if (this.terminalIds.get(terminal) === terminalId) return terminal;
     }
     return undefined;
   }
