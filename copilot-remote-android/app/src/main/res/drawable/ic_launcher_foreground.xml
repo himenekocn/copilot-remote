@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Robot/Chat icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30 C42,30 32,38 32,48 L32,62 C32,72 42,80 54,80 L54,86 L62,80 C74,80 84,72 84,62 L84,48 C84,38 74,30 62,30 Z" />
+
+    <!-- Eyes -->
+    <path
+        android:fillColor="#6C63FF"
+        android:pathData="M46,48 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <path
+        android:fillColor="#6C63FF"
+        android:pathData="M66,48 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <!-- Antenna -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,22 L54,30"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3" />
+
+    <path
+        android:fillColor="#6C63FF"
+        android:pathData="M54,18 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

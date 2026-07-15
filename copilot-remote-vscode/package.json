@@ -1,0 +1,199 @@
+{
+  "name": "copilot-remote",
+  "displayName": "Copilot Remote Control",
+  "description": "Expose GitHub Copilot's full functionality via WebSocket API for remote control from mobile devices",
+  "version": "1.0.14",
+  "publisher": "copilot-remote",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "AI",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:copilotRemote.startServer",
+    "onCommand:copilotRemote.stopServer",
+    "onCommand:copilotRemote.restartServer",
+    "onCommand:copilotRemote.showStatus",
+    "onCommand:copilotRemote.generateKey",
+    "onCommand:copilotRemote.showQRCode",
+    "onCommand:copilotRemote.refreshInstances",
+    "onCommand:copilotRemote.connectToInstance",
+    "onCommand:copilotRemote.copyInstanceUrl",
+    "onCommand:copilotRemote.openPanel",
+    "onCommand:copilotRemote.showOutputChannel",
+    "onCommand:copilotRemote.testNotification",
+    "onView:copilotRemote.statusView",
+    "onView:copilotRemote.instancesView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilotRemote.startServer",
+        "title": "Copilot Remote: Start Server"
+      },
+      {
+        "command": "copilotRemote.stopServer",
+        "title": "Copilot Remote: Stop Server"
+      },
+      {
+        "command": "copilotRemote.restartServer",
+        "title": "Copilot Remote: Restart Server"
+      },
+      {
+        "command": "copilotRemote.showStatus",
+        "title": "Copilot Remote: Show Status"
+      },
+      {
+        "command": "copilotRemote.generateKey",
+        "title": "Copilot Remote: Generate New Key"
+      },
+      {
+        "command": "copilotRemote.showQRCode",
+        "title": "Copilot Remote: Show Connection QR Code"
+      },
+      {
+        "command": "copilotRemote.refreshInstances",
+        "title": "Copilot Remote: Refresh Instances",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "copilotRemote.connectToInstance",
+        "title": "Copilot Remote: Connect to Instance"
+      },
+      {
+        "command": "copilotRemote.copyInstanceUrl",
+        "title": "Copilot Remote: Copy Instance URL"
+      },
+      {
+        "command": "copilotRemote.openPanel",
+        "title": "Copilot Remote: Open Dashboard Panel",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "copilotRemote.showOutputChannel",
+        "title": "Copilot Remote: Show Output Log"
+      },
+      {
+        "command": "copilotRemote.testNotification",
+        "title": "Copilot Remote: Test Notification"
+      }
+    ],
+    "configuration": {
+      "title": "Copilot Remote Control",
+      "properties": {
+        "copilotRemote.key": {
+          "type": "string",
+          "default": "",
+          "description": "Authentication key for WebSocket API access. Set a strong key to secure your connection."
+        },
+        "copilotRemote.port": {
+          "type": "number",
+          "default": 9876,
+          "description": "Port for the WebSocket server."
+        },
+        "copilotRemote.host": {
+          "type": "string",
+          "default": "0.0.0.0",
+          "description": "Host address to bind the WebSocket server. Use 0.0.0.0 for all interfaces (LAN access) or 127.0.0.1 for localhost only."
+        },
+        "copilotRemote.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the WebSocket server when VS Code starts."
+        },
+        "copilotRemote.patchedCopilotBridge.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prefer the patched GitHub Copilot Chat Remote Bridge for native sessions when available."
+        },
+        "copilotRemote.patchedCopilotBridge.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host of the patched GitHub Copilot Chat Remote Bridge."
+        },
+        "copilotRemote.patchedCopilotBridge.port": {
+          "type": "number",
+          "default": 9877,
+          "description": "Port of the patched GitHub Copilot Chat Remote Bridge."
+        },
+        "copilotRemote.patchedCopilotBridge.key": {
+          "type": "string",
+          "default": "",
+          "description": "Shared key used for the x-copilot-remote-key header when calling the patched GitHub Copilot Chat Remote Bridge."
+        },
+        "copilotRemote.fcm.serviceAccountPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a Firebase service-account JSON file. Keep this file outside the workspace."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilotRemote",
+          "title": "Copilot Remote",
+          "icon": "resources/copilot-remote.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilotRemote": [
+        {
+          "id": "copilotRemote.statusView",
+          "name": "Server Status"
+        },
+        {
+          "id": "copilotRemote.instancesView",
+          "name": "Instances"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "copilotRemote.statusView",
+        "contents": "Copilot Remote Server\n\n[Start Server](command:copilotRemote.startServer)\n[Open Dashboard](command:copilotRemote.openPanel)\n[Generate Key](command:copilotRemote.generateKey)\n\nConfigure in Settings > Copilot Remote Control"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "copilotRemote.connectToInstance",
+          "when": "view == copilotRemote.instancesView && viewItem == copilotRemote.instance",
+          "group": "inline@1"
+        },
+        {
+          "command": "copilotRemote.copyInstanceUrl",
+          "when": "view == copilotRemote.instancesView && viewItem =~ /^(copilotRemote.instance|copilotRemote.thisWindow)$/",
+          "group": "2_copilotRemote@1"
+        },
+        {
+          "command": "copilotRemote.refreshInstances",
+          "when": "view == copilotRemote.instancesView && viewItem == copilotRemote.discoveredGroup",
+          "group": "inline@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc -p ./ --noEmit",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
