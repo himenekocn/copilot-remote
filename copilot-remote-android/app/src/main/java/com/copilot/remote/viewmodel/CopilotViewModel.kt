@@ -287,6 +287,11 @@ class CopilotViewModel(
                 updateConnection(profileId) { it.copy(models = models) }
                 if (_uiState.value.selectedModelId.isNotBlank() && models.none { it.id == _uiState.value.selectedModelId }) {
                     selectModel("")
+                } else {
+                    val selectedModel = models.find { it.id == _uiState.value.selectedModelId }
+                    if (_uiState.value.selectedReasoningEffort !in selectedModel?.effectiveReasoningEfforts().orEmpty()) {
+                        selectReasoningEffort("")
+                    }
                 }
             }
 
@@ -1337,7 +1342,11 @@ class CopilotViewModel(
             put("options", JSONObject().apply {
                 put("sessionResource", state.activeOfficialSessionResource)
                 if (state.selectedParticipant.isNotBlank()) put("participant", state.selectedParticipant)
-                if (state.selectedReasoningEffort.isNotBlank()) put("reasoningEffort", state.selectedReasoningEffort)
+                val selectedModel = state.models.find { it.id == state.selectedModelId }
+                val reasoningEffort = state.selectedReasoningEffort.takeIf {
+                    it in selectedModel?.effectiveReasoningEfforts().orEmpty()
+                }
+                if (!reasoningEffort.isNullOrBlank()) put("reasoningEffort", reasoningEffort)
                 put("permissionLevel", state.permissionLevel)
                 state.enabledTools?.let { put("enabledTools", JSONArray(it.toList())) }
             })
@@ -1420,14 +1429,19 @@ class CopilotViewModel(
             id.isNotBlank() && (_uiState.value.models.isEmpty() || _uiState.value.models.any { it.id == id })
         }.orEmpty()
         _uiState.update { state ->
+            val effectiveModelId = knownModelId.ifBlank { state.selectedModelId }
+            val model = state.models.find { it.id == effectiveModelId }
+            val supportedEffort = reasoningEffort.takeIf { it in model?.effectiveReasoningEfforts().orEmpty() }.orEmpty()
             state.copy(
-                selectedModelId = knownModelId.ifBlank { state.selectedModelId },
-                selectedReasoningEffort = reasoningEffort,
+                selectedModelId = effectiveModelId,
+                selectedReasoningEffort = supportedEffort,
             )
         }
         viewModelScope.launch {
             if (knownModelId.isNotBlank()) settingsStore.updateSelectedModel(knownModelId)
-            settingsStore.updateSelectedReasoningEffort(reasoningEffort)
+            val model = _uiState.value.models.find { it.id == _uiState.value.selectedModelId }
+            val supportedEffort = reasoningEffort.takeIf { it in model?.effectiveReasoningEfforts().orEmpty() }.orEmpty()
+            settingsStore.updateSelectedReasoningEffort(supportedEffort)
         }
     }
 

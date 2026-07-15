@@ -183,10 +183,6 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 							return endpointKeys.some(key => modelKeys.includes(key));
 						});
 						const declaredEfforts = endpoint?.supportsReasoningEffort || [];
-						const modelKey = `${model.id} ${model.name} ${model.family}`.toLowerCase();
-						const fallbackEfforts = /(?:oaicopilot|gpt-[5-9]|claude|gemini|deepseek|qwen|qwq|glm|kimi|minimax|mimo|grok|magistral|reasoning|thinking|\bo[134](?:\b|-)|\br1(?:\b|-))/.test(modelKey)
-							? ['none', 'low', 'medium', 'high', 'xhigh']
-							: [];
 						return {
 						id: model.id,
 						name: model.name,
@@ -194,7 +190,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 						family: model.family,
 						version: model.version,
 						maxInputTokens: model.maxInputTokens,
-						reasoningEfforts: declaredEfforts.length ? declaredEfforts : fallbackEfforts,
+						reasoningEfforts: declaredEfforts,
 					};
 					}),
 				});
