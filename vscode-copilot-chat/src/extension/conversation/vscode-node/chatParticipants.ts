@@ -214,14 +214,16 @@ Learn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-c
 				const modelConfiguration = { ...remoteModelConfiguration };
 				delete modelConfiguration.permissionLevel;
 				delete modelConfiguration.enabledTools;
-				request = {
-					...request,
+				// ChatRequest is a VS Code host object with prototype methods (including `with`).
+				// Rebuilding it with object spread turns it into a plain object and crashes later
+				// in the chat pipeline with "o.with is not a function".
+				Object.assign(request as unknown as Record<string, unknown>, {
 					modelConfiguration: { ...request.modelConfiguration, ...modelConfiguration },
 					permissionLevel: permissionLevel === 'autoApprove' || permissionLevel === 'autopilot' ? permissionLevel : request.permissionLevel,
 					tools: Array.isArray(enabledTools)
 						? new Map(Array.from(request.tools, ([tool, enabled]) => [tool, enabled && enabledTools.includes(typeof tool === 'string' ? tool : tool.name)]))
 						: request.tools,
-				};
+				});
 			}
 			remoteChatState.start(request, context.history);
 			try {
