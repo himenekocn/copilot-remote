@@ -7,6 +7,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -19,13 +22,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.copilot.remote.data.ChatAttachment
 import com.copilot.remote.data.ChatMessage
 import com.copilot.remote.data.ModelInfo
@@ -118,7 +129,7 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                 }
             } else if (state.chatMessages.isEmpty()) item { EmptyConversation() }
             items(state.chatMessages, key = { it.id }) { message ->
-                MessageCard(message) { viewModel.retryMessage(message.id) }
+                MessageCard(message, { viewModel.retryMessage(message.id) }) { previewAttachment = it }
             }
         }
         if (attachments.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -288,8 +299,58 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
         }
     }
     previewAttachment?.let { attachment ->
-        SuperDialog(show = true, title = attachment.name, onDismissRequest = { previewAttachment = null }) {
-            AttachmentImage(attachment, Modifier.fillMaxWidth().heightIn(max = 620.dp), ContentScale.Fit)
+        ZoomableAttachmentViewer(attachment) { previewAttachment = null }
+    }
+}
+
+@Composable
+private fun ZoomableAttachmentViewer(attachment: ChatAttachment, onDismiss: () -> Unit) {
+    val bitmap = remember(attachment.dataBase64) {
+        runCatching { Base64.decode(attachment.dataBase64, Base64.DEFAULT) }.getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
+    }
+    var scale by remember(attachment.dataBase64) { mutableFloatStateOf(1f) }
+    var offset by remember(attachment.dataBase64) { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    fun bounded(value: Offset, targetScale: Float): Offset {
+        val maxX = viewport.width * (targetScale - 1f) / 2f
+        val maxY = viewport.height * (targetScale - 1f) / 2f
+        return Offset(value.x.coerceIn(-maxX, maxX), value.y.coerceIn(-maxY, maxY))
+    }
+    fun reset() { scale = 1f; offset = Offset.Zero }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black).onSizeChanged { viewport = it }) {
+            if (bitmap != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = bitmap,
+                    contentDescription = attachment.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
+                        .pointerInput(attachment.dataBase64) {
+                            detectTransformGestures { centroid, pan, zoom, _ ->
+                                val nextScale = (scale * zoom).coerceIn(1f, 6f)
+                                val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                                val focusAdjustment = (centroid - center) * (1f - nextScale / scale)
+                                offset = if (nextScale == 1f) Offset.Zero else bounded(offset + pan + focusAdjustment, nextScale)
+                                scale = nextScale
+                            }
+                        }
+                        .pointerInput(attachment.dataBase64) {
+                            detectTapGestures(onDoubleTap = {
+                                if (scale > 1f) reset() else { scale = 2.5f; offset = Offset.Zero }
+                            })
+                        },
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.BrokenImage, "图片无法显示", tint = Color.White) }
+            }
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp), backgroundColor = Color(0x99000000)) { Icon(Icons.Default.Close, "关闭图片", tint = Color.White) }
+                Text(attachment.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                if (scale > 1f) TextButton("${(scale * 100).toInt()}% · 复位", onClick = ::reset)
+            }
+            Text("双指缩放 · 拖动查看 · 双击放大/复位", color = Color.White.copy(alpha = .72f), style = MiuixTheme.textStyles.footnote1, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(18.dp))
         }
     }
 }
@@ -337,16 +398,16 @@ private fun permissionLabel(level: String) = when (level) {
 }
 
 @Composable
-private fun MessageCard(message: ChatMessage, onRetry: () -> Unit) {
+private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
     val user = message.role == "user"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (user) {
             Card(modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(.86f), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)) {
-                MessageContent(message, onRetry)
+                MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else if (message.kind == "tool" || message.kind == "thinking") {
             Box(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp)) {
-                MessageContent(message, onRetry)
+                MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else {
             Row(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp), verticalAlignment = Alignment.Top) {
@@ -354,17 +415,26 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit) {
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp), tint = MiuixTheme.colorScheme.primary) }
                 }
                 Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f).padding(top = 4.dp)) { MessageContent(message, onRetry) }
+                Box(Modifier.weight(1f).padding(top = 4.dp)) { MessageContent(message, onRetry, onPreviewAttachment) }
             }
         }
     }
 }
 
 @Composable
-private fun MessageContent(message: ChatMessage, onRetry: () -> Unit) {
+private fun MessageContent(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
     Column {
         RichMessageContent(message)
-        if (message.attachments.isNotEmpty()) Text("${message.attachments.size} 个附件", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+        if (message.attachments.isNotEmpty()) {
+            LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(message.attachments.size) { index ->
+                    val attachment = message.attachments[index]
+                    if (attachment.mimeType.startsWith("image/")) {
+                        AttachmentImage(attachment, Modifier.size(92.dp).clip(RoundedCornerShape(12.dp)).clickable { onPreviewAttachment(attachment) }, ContentScale.Crop)
+                    } else Text(attachment.name, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                }
+            }
+        }
         if (!message.isStreaming && message.role != "user" && message.content.isBlank()) TextButton("重试", onRetry)
         if (message.isStreaming) InfiniteProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
