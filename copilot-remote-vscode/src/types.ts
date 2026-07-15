@@ -281,12 +281,13 @@ export type ClientMessage =
   | { type: 'closeFile'; filePath: string }
   | { type: 'findDefinitions'; filePath: string; line: number; character: number }
   | { type: 'findReferences'; filePath: string; line: number; character: number }
-  | { type: 'getGitStatus' }
-  | { type: 'getGitDiff'; filePath?: string }
-  | { type: 'getGitHistory'; limit?: number }
-  | { type: 'checkoutGitBranch'; branch: string }
-  | { type: 'createGitBranch'; branch: string; checkout?: boolean }
-  | { type: 'commitGitChanges'; message: string; all?: boolean }
+  | { type: 'getGitStatus'; repositoryId?: string }
+  | { type: 'getGitDiff'; filePath?: string; repositoryId?: string; commit?: string }
+  | { type: 'getGitHistory'; limit?: number; repositoryId?: string }
+  | { type: 'checkoutGitBranch'; branch: string; repositoryId?: string }
+  | { type: 'createGitBranch'; branch: string; checkout?: boolean; repositoryId?: string }
+  | { type: 'commitGitChanges'; message: string; all?: boolean; repositoryId?: string }
+  | { type: 'gitAction'; action: 'stage' | 'unstage' | 'discard' | 'pull' | 'push' | 'fetch' | 'sync'; repositoryId?: string; paths?: string[] }
   | { type: 'listPullRequests'; state?: 'open' | 'closed' | 'merged' | 'all' }
   | { type: 'openPullRequest'; number: number }
   | { type: 'createPullRequest'; title: string; body?: string; base?: string; draft?: boolean }
@@ -349,7 +350,7 @@ export type ServerMessage =
   | { type: 'directoryEntries'; path: string; entries: Array<{ name: string; path: string; type: 'file' | 'directory' }> ; error?: string }
   | { type: 'fileOpened'; filePath: string; success: boolean; error?: string }
   | { type: 'fileClosed'; filePath: string; success: boolean; error?: string }
-  | { type: 'gitStatus'; branch: string; branches: string[]; changes: Array<{ path: string; status: string }>; error?: string }
+  | { type: 'gitStatus'; repositoryId: string; repositories: Array<{ id: string; name: string; root: string; branch: string; changes: number }>; branch: string; branches: string[]; ahead: number; behind: number; remotes: string[]; changes: Array<{ path: string; filePath: string; status: string; staged: boolean }>; error?: string }
   | { type: 'gitDiff'; filePath?: string; diff: string; error?: string }
   | { type: 'gitHistory'; commits: Array<{ hash: string; message: string; author: string; date: string }>; error?: string }
   | { type: 'gitOperation'; operation: string; success: boolean; error?: string }

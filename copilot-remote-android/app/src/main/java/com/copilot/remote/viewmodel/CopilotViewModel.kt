@@ -64,6 +64,11 @@ data class CopilotUiState(
     val directoryPath: String = "",
     val directoryEntries: List<DirectoryEntry> = emptyList(),
     val gitBranch: String = "",
+    val gitRepositoryId: String = "",
+    val gitRepositories: List<GitRepositoryInfo> = emptyList(),
+    val gitAhead: Int = 0,
+    val gitBehind: Int = 0,
+    val gitRemotes: List<String> = emptyList(),
     val gitBranches: List<String> = emptyList(),
     val gitChanges: List<GitChange> = emptyList(),
     val gitHistory: List<GitCommit> = emptyList(),
@@ -631,9 +636,14 @@ class CopilotViewModel(
                 val branches = json.optJSONArray("branches") ?: JSONArray()
                 val changes = json.optJSONArray("changes") ?: JSONArray()
                 conn.copy(
+                    gitRepositoryId = json.optString("repositoryId"),
+                    gitRepositories = (0 until (json.optJSONArray("repositories") ?: JSONArray()).length()).map { index -> (json.optJSONArray("repositories") ?: JSONArray()).getJSONObject(index).let { GitRepositoryInfo(it.optString("id"), it.optString("name"), it.optString("root"), it.optString("branch"), it.optInt("changes")) } },
                     gitBranch = json.optString("branch"),
+                    gitAhead = json.optInt("ahead"),
+                    gitBehind = json.optInt("behind"),
+                    gitRemotes = (0 until (json.optJSONArray("remotes") ?: JSONArray()).length()).map { (json.optJSONArray("remotes") ?: JSONArray()).optString(it) },
                     gitBranches = (0 until branches.length()).map { branches.optString(it) },
-                    gitChanges = (0 until changes.length()).map { index -> changes.getJSONObject(index).let { GitChange(it.optString("path"), it.optString("status")) } },
+                    gitChanges = (0 until changes.length()).map { index -> changes.getJSONObject(index).let { GitChange(it.optString("path"), it.optString("status"), it.optString("filePath", it.optString("path")), it.optBoolean("staged")) } },
                     errorMessage = json.optString("error").takeIf { it.isNotBlank() },
                 )
             }
@@ -644,8 +654,8 @@ class CopilotViewModel(
             }
             "gitOperation" -> {
                 val error = json.optString("error")
-                if (error.isNotBlank()) updateConnection(profileId) { it.copy(errorMessage = error) }
-                else { sendViaConnection(profileId, buildJsonCommand("getGitStatus") {}); sendViaConnection(profileId, buildJsonCommand("getGitHistory") {}) }
+                if (error.isNotBlank()) { updateConnection(profileId) { it.copy(errorMessage = error) }; showNotice(error, true) }
+                else { showNotice("Git 操作成功"); val repo = _uiState.value.gitRepositoryId; sendViaConnection(profileId, buildJsonCommand("getGitStatus") { if (repo.isNotBlank()) put("repositoryId", repo) }); sendViaConnection(profileId, buildJsonCommand("getGitHistory") { if (repo.isNotBlank()) put("repositoryId", repo) }) }
             }
 
             "pullRequests" -> {
@@ -955,6 +965,11 @@ class CopilotViewModel(
                 directoryPath = activeConn?.directoryPath ?: "",
                 directoryEntries = activeConn?.directoryEntries ?: emptyList(),
                 gitBranch = activeConn?.gitBranch ?: "",
+                gitRepositoryId = activeConn?.gitRepositoryId ?: "",
+                gitRepositories = activeConn?.gitRepositories ?: emptyList(),
+                gitAhead = activeConn?.gitAhead ?: 0,
+                gitBehind = activeConn?.gitBehind ?: 0,
+                gitRemotes = activeConn?.gitRemotes ?: emptyList(),
                 gitBranches = activeConn?.gitBranches ?: emptyList(),
                 gitChanges = activeConn?.gitChanges ?: emptyList(),
                 gitHistory = activeConn?.gitHistory ?: emptyList(),
@@ -1125,6 +1140,11 @@ class CopilotViewModel(
                     directoryPath = "",
                     directoryEntries = emptyList(),
                     gitBranch = "",
+                    gitRepositoryId = "",
+                    gitRepositories = emptyList(),
+                    gitAhead = 0,
+                    gitBehind = 0,
+                    gitRemotes = emptyList(),
                     gitBranches = emptyList(),
                     gitChanges = emptyList(),
                     gitHistory = emptyList(),
@@ -1601,14 +1621,17 @@ class CopilotViewModel(
     fun closeFile(path: String) = sendViaActiveConnection(buildJsonCommand("closeFile") { put("filePath", path) })
 
     fun refreshGit() = refreshActive { profileId ->
-        sendViaConnection(profileId, buildJsonCommand("getGitStatus") {})
-        sendViaConnection(profileId, buildJsonCommand("getGitHistory") {})
+        val repo = _uiState.value.gitRepositoryId
+        sendViaConnection(profileId, buildJsonCommand("getGitStatus") { if (repo.isNotBlank()) put("repositoryId", repo) })
+        sendViaConnection(profileId, buildJsonCommand("getGitHistory") { if (repo.isNotBlank()) put("repositoryId", repo) })
         sendViaConnection(profileId, buildJsonCommand("listPullRequests") {})
     }
-    fun getGitDiff(path: String? = null) = sendViaActiveConnection(buildJsonCommand("getGitDiff") { path?.let { put("filePath", it) } })
-    fun checkoutBranch(branch: String) = sendViaActiveConnection(buildJsonCommand("checkoutGitBranch") { put("branch", branch) })
-    fun createBranch(branch: String) { if (branch.isNotBlank()) sendViaActiveConnection(buildJsonCommand("createGitBranch") { put("branch", branch); put("checkout", true) }) }
-    fun commitChanges(message: String) { if (message.isNotBlank()) sendViaActiveConnection(buildJsonCommand("commitGitChanges") { put("message", message); put("all", true) }) }
+    fun selectGitRepository(id: String) { _uiState.update { it.copy(gitRepositoryId = id) }; refreshGit() }
+    fun getGitDiff(path: String? = null, commit: String? = null) = sendViaActiveConnection(buildJsonCommand("getGitDiff") { path?.let { put("filePath", it) }; commit?.let { put("commit", it) }; _uiState.value.gitRepositoryId.takeIf(String::isNotBlank)?.let { put("repositoryId", it) } })
+    fun checkoutBranch(branch: String) = sendViaActiveConnection(buildJsonCommand("checkoutGitBranch") { put("branch", branch); put("repositoryId", _uiState.value.gitRepositoryId) })
+    fun createBranch(branch: String) { if (branch.isNotBlank()) sendViaActiveConnection(buildJsonCommand("createGitBranch") { put("branch", branch); put("checkout", true); put("repositoryId", _uiState.value.gitRepositoryId) }) }
+    fun commitChanges(message: String, all: Boolean = false) { if (message.isNotBlank()) sendViaActiveConnection(buildJsonCommand("commitGitChanges") { put("message", message); put("all", all); put("repositoryId", _uiState.value.gitRepositoryId) }) }
+    fun gitAction(action: String, paths: List<String> = emptyList()) = sendViaActiveConnection(buildJsonCommand("gitAction") { put("action", action); put("repositoryId", _uiState.value.gitRepositoryId); if (paths.isNotEmpty()) put("paths", JSONArray(paths)) })
     fun openPullRequest(number: Int) = sendViaActiveConnection(buildJsonCommand("openPullRequest") { put("number", number) })
     fun createPullRequest(title: String, body: String = "", base: String = "") { if (title.isNotBlank()) sendViaActiveConnection(buildJsonCommand("createPullRequest") { put("title", title); put("body", body); if (base.isNotBlank()) put("base", base) }) }
     fun setEditorSelection(filePath: String, startLine: Int, startCharacter: Int, endLine: Int, endCharacter: Int) = sendViaActiveConnection(buildJsonCommand("setEditorSelection") {

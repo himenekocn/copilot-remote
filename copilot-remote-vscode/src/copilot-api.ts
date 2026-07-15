@@ -1276,27 +1276,41 @@ export class CopilotApi {
     });
   }
 
-  private async gitRepository(): Promise<any> {
+  private async gitRepositories(): Promise<any[]> {
     const extension = vscode.extensions.getExtension('vscode.git');
     if (!extension) throw new Error('Built-in Git extension is unavailable');
     const exports = extension.isActive ? extension.exports : await extension.activate();
-    const repository = exports.getAPI(1).repositories[0];
+    return exports.getAPI(1).repositories;
+  }
+
+  private async gitRepository(repositoryId?: string): Promise<any> {
+    const repositories = await this.gitRepositories();
+    const repository = repositoryId ? repositories.find(repo => repo.rootUri.toString() === repositoryId || repo.rootUri.fsPath === repositoryId) : repositories[0];
     if (!repository) throw new Error('No Git repository is open');
     return repository;
   }
 
-  async getGitStatus() {
-    const repository = await this.gitRepository();
-    const changes = [...repository.state.indexChanges, ...repository.state.workingTreeChanges, ...repository.state.mergeChanges];
+  async getGitStatus(repositoryId?: string) {
+    const all = await this.gitRepositories();
+    if (!all.length) throw new Error('No Git repository is open');
+    const repository = await this.gitRepository(repositoryId);
+    const indexChanges = repository.state.indexChanges.map((change: any) => ({ change, staged: true }));
+    const otherChanges = [...repository.state.workingTreeChanges, ...repository.state.mergeChanges].map((change: any) => ({ change, staged: false }));
     return {
+      repositoryId: repository.rootUri.toString(),
+      repositories: all.map(repo => ({ id: repo.rootUri.toString(), name: path.basename(repo.rootUri.fsPath), root: repo.rootUri.fsPath, branch: repo.state.HEAD?.name || '', changes: repo.state.indexChanges.length + repo.state.workingTreeChanges.length + repo.state.mergeChanges.length })),
       branch: repository.state.HEAD?.name || '',
       branches: (await repository.getBranches({ remote: false })).map((branch: any) => branch.name).filter(Boolean),
-      changes: changes.map((change: any) => ({ path: vscode.workspace.asRelativePath(change.uri), status: String(change.status) })),
+      ahead: repository.state.HEAD?.ahead || 0,
+      behind: repository.state.HEAD?.behind || 0,
+      remotes: repository.state.remotes.map((remote: any) => remote.name),
+      changes: [...indexChanges, ...otherChanges].map(({ change, staged }) => ({ path: path.relative(repository.rootUri.fsPath, change.uri.fsPath), filePath: change.uri.fsPath, status: String(change.status), staged })),
     };
   }
 
-  async getGitDiff(filePath?: string) {
-    const repository = await this.gitRepository();
+  async getGitDiff(filePath?: string, repositoryId?: string, commit?: string) {
+    const repository = await this.gitRepository(repositoryId);
+    if (commit) return repository.diffWith(commit + '^', commit);
     if (filePath) {
       const path = this.workspaceUri(filePath).fsPath;
       return (await Promise.all([repository.diffIndexWithHEAD(path), repository.diffWithHEAD(path)])).filter(Boolean).join('\n');
@@ -1304,22 +1318,34 @@ export class CopilotApi {
     return (await Promise.all([repository.diff(true), repository.diff(false)])).filter(Boolean).join('\n');
   }
 
-  async getGitHistory(limit = 50) {
-    const repository = await this.gitRepository();
+  async getGitHistory(limit = 50, repositoryId?: string) {
+    const repository = await this.gitRepository(repositoryId);
     const commits = await repository.log({ maxEntries: Math.min(Math.max(limit, 1), 200) });
     return commits.map((commit: any) => ({ hash: commit.hash, message: commit.message, author: commit.authorName || '', date: commit.authorDate ? new Date(commit.authorDate).toISOString() : '' }));
   }
 
-  async checkoutGitBranch(branch: string) { await (await this.gitRepository()).checkout(branch); }
-  async createGitBranch(branch: string, checkout = true) { await (await this.gitRepository()).createBranch(branch, checkout); }
-  async commitGitChanges(message: string, all = false) {
-    const repository = await this.gitRepository();
+  async checkoutGitBranch(branch: string, repositoryId?: string) { await (await this.gitRepository(repositoryId)).checkout(branch); }
+  async createGitBranch(branch: string, checkout = true, repositoryId?: string) { await (await this.gitRepository(repositoryId)).createBranch(branch, checkout); }
+  async commitGitChanges(message: string, all = false, repositoryId?: string) {
+    const repository = await this.gitRepository(repositoryId);
     if (all) {
       await repository.status();
       const paths = [...repository.state.workingTreeChanges, ...repository.state.mergeChanges].map((change: any) => change.uri.fsPath);
       if (paths.length) await repository.add(paths);
     }
     await repository.commit(message);
+  }
+
+  async gitAction(action: string, repositoryId?: string, paths: string[] = []) {
+    const repository = await this.gitRepository(repositoryId);
+    if (action === 'stage') await repository.add(paths);
+    else if (action === 'unstage') await repository.revert(paths);
+    else if (action === 'discard') await repository.clean(paths);
+    else if (action === 'pull') await repository.pull();
+    else if (action === 'push') await repository.push();
+    else if (action === 'fetch') await repository.fetch();
+    else if (action === 'sync') await repository.sync();
+    else throw new Error(`Unsupported Git action: ${action}`);
   }
 
   async listPullRequests(state = 'open') {

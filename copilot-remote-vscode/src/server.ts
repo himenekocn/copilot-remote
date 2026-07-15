@@ -511,30 +511,34 @@ export class CopilotRemoteServer {
         this.send(ws, { type: 'searchResults', kind: 'references', results: await this.copilotApi.findLocations('references', message.filePath, message.line, message.character) });
         break;
       case 'getGitStatus':
-        try { this.send(ws, { type: 'gitStatus', ...(await this.copilotApi.getGitStatus()) }); }
-        catch (err) { this.send(ws, { type: 'gitStatus', branch: '', branches: [], changes: [], error: err instanceof Error ? err.message : String(err) }); }
+        try { this.send(ws, { type: 'gitStatus', ...(await this.copilotApi.getGitStatus(message.repositoryId)) }); }
+        catch (err) { this.send(ws, { type: 'gitStatus', repositoryId: '', repositories: [], branch: '', branches: [], ahead: 0, behind: 0, remotes: [], changes: [], error: err instanceof Error ? err.message : String(err) }); }
         break;
       case 'getGitDiff':
-        try { this.send(ws, { type: 'gitDiff', filePath: message.filePath, diff: await this.copilotApi.getGitDiff(message.filePath) }); }
+        try { this.send(ws, { type: 'gitDiff', filePath: message.filePath, diff: await this.copilotApi.getGitDiff(message.filePath, message.repositoryId, message.commit) }); }
         catch (err) { this.send(ws, { type: 'gitDiff', filePath: message.filePath, diff: '', error: err instanceof Error ? err.message : String(err) }); }
         break;
       case 'getGitHistory':
-        try { this.send(ws, { type: 'gitHistory', commits: await this.copilotApi.getGitHistory(message.limit) }); }
+        try { this.send(ws, { type: 'gitHistory', commits: await this.copilotApi.getGitHistory(message.limit, message.repositoryId) }); }
         catch (err) { this.send(ws, { type: 'gitHistory', commits: [], error: err instanceof Error ? err.message : String(err) }); }
         break;
       case 'checkoutGitBranch':
       case 'createGitBranch':
       case 'commitGitChanges': {
         try {
-          if (message.type === 'checkoutGitBranch') await this.copilotApi.checkoutGitBranch(message.branch);
-          else if (message.type === 'createGitBranch') await this.copilotApi.createGitBranch(message.branch, message.checkout);
-          else await this.copilotApi.commitGitChanges(message.message, message.all);
+          if (message.type === 'checkoutGitBranch') await this.copilotApi.checkoutGitBranch(message.branch, message.repositoryId);
+          else if (message.type === 'createGitBranch') await this.copilotApi.createGitBranch(message.branch, message.checkout, message.repositoryId);
+          else await this.copilotApi.commitGitChanges(message.message, message.all, message.repositoryId);
           this.send(ws, { type: 'gitOperation', operation: message.type, success: true });
         } catch (err) {
           this.send(ws, { type: 'gitOperation', operation: message.type, success: false, error: err instanceof Error ? err.message : String(err) });
         }
         break;
       }
+      case 'gitAction':
+        try { await this.copilotApi.gitAction(message.action, message.repositoryId, message.paths); this.send(ws, { type: 'gitOperation', operation: message.action, success: true }); }
+        catch (err) { this.send(ws, { type: 'gitOperation', operation: message.action, success: false, error: err instanceof Error ? err.message : String(err) }); }
+        break;
       case 'listPullRequests':
         try { this.send(ws, { type: 'pullRequests', pullRequests: await this.copilotApi.listPullRequests(message.state) }); }
         catch (err) { this.send(ws, { type: 'pullRequests', pullRequests: [], error: err instanceof Error ? err.message : String(err) }); }

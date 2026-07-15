@@ -265,7 +265,8 @@ data class SearchResult(
 )
 
 data class DirectoryEntry(val name: String, val path: String, val isDirectory: Boolean)
-data class GitChange(val path: String, val status: String)
+data class GitRepositoryInfo(val id: String, val name: String, val root: String, val branch: String, val changes: Int)
+data class GitChange(val path: String, val status: String, val filePath: String = path, val staged: Boolean = false)
 data class GitCommit(val hash: String, val message: String, val author: String, val date: String)
 data class PullRequestInfo(val number: Int, val title: String, val state: String, val author: String, val headRefName: String, val baseRefName: String, val url: String)
 
@@ -328,6 +329,11 @@ data class Connection(
     val directoryPath: String = "",
     val directoryEntries: List<DirectoryEntry> = emptyList(),
     val gitBranch: String = "",
+    val gitRepositoryId: String = "",
+    val gitRepositories: List<GitRepositoryInfo> = emptyList(),
+    val gitAhead: Int = 0,
+    val gitBehind: Int = 0,
+    val gitRemotes: List<String> = emptyList(),
     val gitBranches: List<String> = emptyList(),
     val gitChanges: List<GitChange> = emptyList(),
     val gitHistory: List<GitCommit> = emptyList(),

@@ -88,7 +88,7 @@ fun AppNavigation(viewModel: CopilotViewModel) {
                 composable(Screen.Explorer.route) { ExplorerScreen(viewModel) }
                 composable(Screen.Workspace.route) { WorkspaceScreen(viewModel) }
                 composable(Screen.Terminal.route) { TerminalScreen(viewModel) }
-                composable(Screen.Git.route) { GitScreen(viewModel) }
+                composable(Screen.Git.route) { GitScreen(viewModel) { navigate(Screen.Explorer) } }
                 composable(Screen.Models.route) { ModelsScreen(viewModel) }
                 composable(Screen.Agents.route) { AgentsScreen(viewModel) }
                 composable(Screen.Skills.route) { SkillsScreen(viewModel) }
