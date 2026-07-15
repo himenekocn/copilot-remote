@@ -161,10 +161,10 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
         val effortLabel = state.selectedReasoningEffort.takeIf { it.isNotBlank() }?.let(::reasoningEffortLabel)
         val selectedAgent = state.participants.find { it.name == state.selectedParticipant || it.id == state.selectedParticipant }
         LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { TextButton(listOfNotNull(selectedModel?.name ?: "自动模型", effortLabel).joinToString(" · "), { showModels = true }) }
-            item { TextButton(selectedAgent?.fullName ?: "直接对话", { showAgents = true }) }
-            item { TextButton(permissionLabel(state.permissionLevel), { showPermissions = true }) }
-            item { TextButton(state.enabledTools?.let { "工具 ${it.size}" } ?: "工具 默认", { showTools = true }) }
+            item { ChatOptionButton(listOfNotNull(selectedModel?.name ?: "自动模型", effortLabel).joinToString(" · ")) { showModels = true } }
+            item { ChatOptionButton(selectedAgent?.fullName ?: "直接对话") { showAgents = true } }
+            item { ChatOptionButton(permissionLabel(state.permissionLevel)) { showPermissions = true } }
+            item { ChatOptionButton(state.enabledTools?.let { "工具 ${it.size}" } ?: "工具 默认") { showTools = true } }
         }
         Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 12.dp, end = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
             IconButton(onClick = { showAddMenu = true }, enabled = !state.isSending, modifier = Modifier.size(54.dp), backgroundColor = MiuixTheme.colorScheme.surfaceContainer) { Icon(Icons.Default.Add, "添加上下文", modifier = Modifier.size(27.dp)) }
@@ -318,6 +318,19 @@ private fun AttachmentImage(attachment: ChatAttachment, modifier: Modifier, cont
     }
     if (bitmap != null) androidx.compose.foundation.Image(bitmap, attachment.name, modifier, contentScale = contentScale)
     else Box(modifier, contentAlignment = Alignment.Center) { Icon(Icons.Default.BrokenImage, "图片无法显示") }
+}
+
+@Composable
+private fun ChatOptionButton(label: String, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.width(104.dp).height(40.dp).clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = MiuixTheme.colorScheme.surfaceVariant,
+    ) {
+        Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }
 
 private fun permissionLabel(level: String) = when (level) {
