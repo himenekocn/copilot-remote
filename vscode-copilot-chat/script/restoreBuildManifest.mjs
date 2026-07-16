@@ -5,13 +5,18 @@ const lockPath = new URL('../package-lock.json', import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
 const rootPackage = lock.packages?.[''];
+const patchedVersion = process.env.COPILOT_CHAT_PATCHED_VERSION || '0.57.1';
+
+// The patched extension must be newer than VS Code's bundled Copilot Chat,
+// otherwise VS Code rejects the VSIX as a downgrade before it can be enabled.
+manifest.version = patchedVersion;
 
 if (process.argv.includes('--strip')) {
 	delete manifest.scripts;
 	delete manifest.dependencies;
 	delete manifest.devDependencies;
 	fs.writeFileSync(manifestPath, JSON.stringify(manifest));
-	console.log('Restored production Copilot Chat manifest');
+	console.log(`Restored production Copilot Chat manifest (${patchedVersion})`);
 	process.exit(0);
 }
 
@@ -27,4 +32,4 @@ manifest.dependencies = rootPackage.dependencies;
 manifest.devDependencies = rootPackage.devDependencies;
 
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, '\t')}\n`);
-console.log('Restored Copilot Chat build metadata from package-lock.json');
+console.log(`Restored Copilot Chat build metadata from package-lock.json (${patchedVersion})`);

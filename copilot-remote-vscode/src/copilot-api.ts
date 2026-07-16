@@ -510,10 +510,19 @@ export class CopilotApi {
     let disposed = false;
     let request: http.ClientRequest | undefined;
     let retry: NodeJS.Timeout | undefined;
+    let consecutiveFailures = 0;
+    let lastReportedError = '';
     const reconnect = (error?: Error) => {
       if (disposed) return;
-      if (error) onError(error);
-      if (!retry) retry = setTimeout(() => { retry = undefined; connect(); }, 2_000);
+      if (retry) return;
+      consecutiveFailures++;
+      const message = error?.message || 'Patched bridge connection closed';
+      if (consecutiveFailures === 1 || message !== lastReportedError) {
+        lastReportedError = message;
+        onError(new Error(`${message}; retrying in background`));
+      }
+      const delay = Math.min(30_000, 2_000 * (2 ** Math.min(consecutiveFailures - 1, 4)));
+      retry = setTimeout(() => { retry = undefined; connect(); }, delay);
     };
     const connect = () => {
       if (disposed) return;
@@ -524,6 +533,8 @@ export class CopilotApi {
           reconnect(new Error(`Patched bridge event stream returned ${response.statusCode}`));
           return;
         }
+        consecutiveFailures = 0;
+        lastReportedError = '';
         response.setEncoding('utf8');
         response.on('data', chunk => {
           buffer += chunk;
