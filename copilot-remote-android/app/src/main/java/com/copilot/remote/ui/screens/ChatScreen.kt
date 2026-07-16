@@ -12,6 +12,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -133,7 +135,8 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
             val used = usage.promptTokens + usage.completionTokens
             LinearProgressIndicator(progress = if (usage.maxInputTokens > 0) used.toFloat() / usage.maxInputTokens else 0f, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = if (state.chatTodos.isNotEmpty()) 76.dp else 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (state.activeNativeChatSessionId.isNotBlank() && state.nativeMessagesHasMoreBefore) item { Button(viewModel::loadOlderNativeMessages, modifier = Modifier.fillMaxWidth()) { Text("加载更早消息") } }
             if (state.nativeMessagesLoading && state.chatMessages.isEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(top = 100.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -150,11 +153,12 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                     MessageCard(message, { viewModel.retryMessage(message.id) }) { previewAttachment = it }
                 }
             }
-            if (state.chatTodos.isNotEmpty()) {
-                item(key = "active-todos") {
-                    TodoProgressCard(state.chatTodos, state.isSending)
-                }
+        }
+        if (state.chatTodos.isNotEmpty()) {
+            Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().background(MiuixTheme.colorScheme.surface).padding(horizontal = 12.dp)) {
+                TodoProgressCard(state.chatTodos, state.isSending)
             }
+        }
         }
         if (attachments.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(attachments.size) { index ->
@@ -452,7 +456,7 @@ private fun buildChatTimeline(messages: List<ChatMessage>): List<ChatTimelineEnt
 private fun TodoProgressCard(items: List<ChatTodoItem>, isRunning: Boolean) {
     val completed = items.count { it.status == "completed" }
     val active = items.indexOfFirst { it.status == "in-progress" }
-    var expanded by remember(items.firstOrNull()?.id) { mutableStateOf(isRunning || completed < items.size) }
+    var expanded by remember(items.firstOrNull()?.id) { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -478,7 +482,7 @@ private fun TodoProgressCard(items: List<ChatTodoItem>, isRunning: Boolean) {
             )
             AnimatedVisibility(expanded) {
                 Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     items.forEachIndexed { index, item ->

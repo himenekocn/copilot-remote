@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -41,6 +42,7 @@ fun ProcessMessageGroup(messages: List<ChatMessage>) {
     val hasThinking = messages.any { it.kind == "thinking" }
     val failed = toolMessages.count { it.toolStatus == "error" }
     val running = messages.any { it.isStreaming } || toolMessages.any { it.toolStatus !in setOf("completed", "error") }
+    val completedSteps = messages.count { !it.isStreaming && (it.kind != "tool" || it.toolStatus in setOf("completed", "error")) }
     var expanded by remember(messages.firstOrNull()?.id) { mutableStateOf(failed > 0) }
     val summary = buildList {
         if (hasThinking) add("思考")
@@ -49,8 +51,8 @@ fun ProcessMessageGroup(messages: List<ChatMessage>) {
     }.joinToString(" · ")
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MiuixTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Transparent,
     ) {
         Column {
             Row(
@@ -65,7 +67,7 @@ fun ProcessMessageGroup(messages: List<ChatMessage>) {
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (running) "正在执行" else "执行过程", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.SemiBold)
+                    Text(if (running) "正在执行…" else "已完成 $completedSteps 个步骤", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.SemiBold)
                     if (summary.isNotBlank()) {
                         Text(summary, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary, maxLines = 1)
                     }

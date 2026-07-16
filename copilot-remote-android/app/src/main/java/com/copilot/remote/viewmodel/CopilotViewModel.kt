@@ -358,7 +358,6 @@ class CopilotViewModel(
                     val messages = conn.chatMessages.toMutableList()
                     if (!isLocalRequest && prompt.isNotBlank()) {
                         messages.add(ChatMessage("user", prompt, id = "$requestId:user"))
-                        messages.add(ChatMessage("assistant", "", isStreaming = true, id = "$requestId:assistant:0"))
                     }
                     conn.copy(
                         chatMessages = messages,
@@ -381,17 +380,17 @@ class CopilotViewModel(
 
             "chatDelta" -> {
                 val requestId = json.optString("requestId")
+                val messageId = json.optString("messageId").ifBlank { "$requestId:assistant:${responseSegments["$profileId:$requestId"] ?: 0}" }
                 val delta = json.optString("delta")
                 if (delta.isNotEmpty()) {
                     updateConnection(profileId) { conn ->
                         if (requestId.isNotBlank() && conn.activeRequestId.isNotBlank() && requestId != conn.activeRequestId) return@updateConnection conn
                         val messages = conn.chatMessages.toMutableList()
-                        val lastIdx = messages.indexOfLast { it.isStreaming }
-                        if (lastIdx >= 0) {
-                            messages[lastIdx] = messages[lastIdx].copy(content = messages[lastIdx].content + delta)
+                        val targetIndex = messages.indexOfFirst { it.id == messageId }
+                        if (targetIndex >= 0) {
+                            messages[targetIndex] = messages[targetIndex].copy(content = messages[targetIndex].content + delta, isStreaming = true)
                         } else {
-                            val segment = responseSegments["$profileId:$requestId"] ?: 0
-                            messages.add(ChatMessage("assistant", delta, isStreaming = true, id = "$requestId:assistant:$segment"))
+                            messages.add(ChatMessage("assistant", delta, isStreaming = true, id = messageId))
                         }
                         updateActiveSessionMessages(conn, messages)
                     }
@@ -455,11 +454,7 @@ class CopilotViewModel(
                         toolOutput = json.optString("output"),
                     )
                     val index = messages.indexOfFirst { it.id == id }
-                    if (index >= 0) messages[index] = message else {
-                        splitStreamingResponse(messages, profileId, requestId)
-                        messages.add(message)
-                        appendStreamingResponse(messages, profileId, requestId)
-                    }
+                    if (index >= 0) messages[index] = message else messages.add(message)
                     updateActiveSessionMessages(conn, messages)
                 }
             }
@@ -1800,11 +1795,7 @@ class CopilotViewModel(
             val index = messages.indexOfFirst { it.id == id }
             val next = if (append && index >= 0) messages[index].content + content else content
             val message = ChatMessage("assistant", next, id = id, kind = kind, toolName = label)
-            if (index >= 0) messages[index] = message else {
-                splitStreamingResponse(messages, profileId, requestId)
-                messages.add(message)
-                appendStreamingResponse(messages, profileId, requestId)
-            }
+            if (index >= 0) messages[index] = message else messages.add(message)
             updateActiveSessionMessages(conn, messages)
         }
     }
@@ -1836,7 +1827,7 @@ class CopilotViewModel(
                 role = message.optString("role"),
                 content = message.optString("content"),
                 timestamp = message.optLong("timestamp", System.currentTimeMillis()),
-                isStreaming = isRunning && id == "$runningRequestId:assistant",
+                isStreaming = isRunning && index == messages.length() - 1 && id.startsWith("$runningRequestId:assistant:"),
                 kind = message.optString("kind", "message"),
                 toolName = message.optString("toolName"),
                 toolStatus = message.optString("toolStatus"),
