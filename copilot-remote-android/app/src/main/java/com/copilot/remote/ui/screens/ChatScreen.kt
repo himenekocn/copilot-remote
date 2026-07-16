@@ -58,7 +58,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
+fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: (() -> Unit)? = null) {
     val state by viewModel.uiState.collectAsState()
     val darkMode = isSystemInDarkTheme()
     val context = LocalContext.current
@@ -120,7 +120,9 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     Box(Modifier.fillMaxSize().background(chatPageColor(darkMode)), contentAlignment = Alignment.TopCenter) {
       Column(Modifier.fillMaxHeight().widthIn(max = 900.dp).fillMaxWidth().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onOpenNavigation, modifier = Modifier.size(52.dp), backgroundColor = MiuixTheme.colorScheme.surfaceContainer) { Icon(Icons.Default.ArrowBack, "打开导航", modifier = Modifier.size(25.dp)) }
+            if (onOpenNavigation != null) {
+                IconButton(onClick = onOpenNavigation, modifier = Modifier.size(52.dp), backgroundColor = MiuixTheme.colorScheme.surfaceContainer) { Icon(Icons.Default.ArrowBack, "打开导航", modifier = Modifier.size(25.dp)) }
+            }
             Surface(Modifier.weight(1f).padding(horizontal = 8.dp), shape = RoundedCornerShape(25.dp), color = MiuixTheme.colorScheme.surfaceContainer) {
                 Column(Modifier.clickable { showSessions = true }.padding(horizontal = 18.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     val storedTitle = state.nativeChatSessions.find { it.id == state.activeNativeChatSessionId }?.title
@@ -177,7 +179,14 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                     ProcessMessageGroup(entry.messages)
                 } else {
                     val message = entry.messages.first()
-                    MessageCard(message, { viewModel.retryMessage(message.id) }) { previewAttachment = it }
+                    MessageCard(
+                        message,
+                        { viewModel.retryMessage(message.id) },
+                        { previewAttachment = it },
+                    ) { reference ->
+                        val parsed = parseVsCodeReference(reference)
+                        viewModel.openFileInVsCodeWithFeedback(parsed.first, parsed.second)
+                    }
                 }
             }
         }
@@ -608,17 +617,17 @@ private fun TodoProgressCard(items: List<ChatTodoItem>, isRunning: Boolean) {
 }
 
 @Composable
-private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
+private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit, onOpenReference: (String) -> Unit) {
     val user = message.role == "user"
     val darkMode = isSystemInDarkTheme()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (user) {
             Card(modifier = Modifier.widthIn(max = 680.dp).wrapContentWidth(), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = if (darkMode) Color(0xFF253B55) else Color(0xFFDDEBFF))) {
-                MessageContent(message, onRetry, onPreviewAttachment)
+                MessageContent(message, onRetry, onPreviewAttachment, onOpenReference)
             }
         } else if (message.kind == "tool" || message.kind == "thinking") {
             Box(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp)) {
-                MessageContent(message, onRetry, onPreviewAttachment)
+                MessageContent(message, onRetry, onPreviewAttachment, onOpenReference)
             }
         } else {
             Surface(
@@ -627,7 +636,7 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAtta
                 color = if (darkMode) Color(0xFF191D22) else Color(0xFFFFFFFF),
             ) {
                 Box(Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
-                    MessageContent(message, onRetry, onPreviewAttachment)
+                    MessageContent(message, onRetry, onPreviewAttachment, onOpenReference)
                 }
             }
         }
@@ -637,9 +646,9 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAtta
 private fun chatPageColor(darkMode: Boolean) = if (darkMode) Color(0xFF101317) else Color(0xFFF3F5F8)
 
 @Composable
-private fun MessageContent(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
+private fun MessageContent(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit, onOpenReference: (String) -> Unit) {
     Column {
-        RichMessageContent(message)
+        RichMessageContent(message, onOpenReference)
         if (message.attachments.isNotEmpty()) {
             LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(message.attachments.size) { index ->
@@ -653,6 +662,15 @@ private fun MessageContent(message: ChatMessage, onRetry: () -> Unit, onPreviewA
         if (!message.isStreaming && message.role != "user" && message.content.isBlank()) TextButton("重试", onRetry)
         if (message.isStreaming) InfiniteProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
+}
+
+private fun parseVsCodeReference(reference: String): Pair<String, Int?> {
+    val uri = Uri.parse(reference)
+    val line = uri.fragment?.let { Regex("L(\\d+)", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toIntOrNull() }
+    val path = if (uri.scheme.equals("file", ignoreCase = true)) {
+        Uri.decode(uri.path.orEmpty()).removePrefix("/").replace('/', '\\')
+    } else reference.substringBefore('#')
+    return path to line
 }
 
 private fun effectiveReasoningEfforts(model: ModelInfo?): List<String> {

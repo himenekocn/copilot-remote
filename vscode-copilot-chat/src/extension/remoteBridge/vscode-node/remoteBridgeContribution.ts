@@ -29,6 +29,8 @@ interface RemoteBridgeSessionInfo {
 	createdAt?: number;
 	updatedAt: number;
 	requestCount: number;
+	status?: 'running' | 'completed' | 'cancelled' | 'error';
+	activeRequestId?: string;
 	messages?: RemoteBridgeSessionMessage[];
 }
 
@@ -249,7 +251,8 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 							snapshot = {
 								...snapshot,
 								sessionResource,
-								status: snapshot?.status === 'error' ? 'error' : 'completed',
+								requestId: snapshot?.requestId || persisted.activeRequestId,
+								status: snapshot?.status === 'error' ? 'error' : persisted.status ?? 'completed',
 								todos: snapshot?.todos ?? [],
 								messages: persistedMessages,
 								updatedAt: persisted.updatedAt,
@@ -257,7 +260,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 						}
 					}
 				}
-				this._sendJson(res, 200, { active: Boolean(sessionResource), sessionResource, snapshot });
+				this._sendJson(res, 200, { active: Boolean(sessionResource), sessionResource, sessionId: sessionResource ? this._sessionIdFromResource(sessionResource) : undefined, snapshot });
 				return;
 			}
 
@@ -334,7 +337,11 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 				const requestId = decodeURIComponent(url.pathname.slice('/chat/cancel/'.length));
 				const source = this._activeChatRequests.get(requestId);
 				if (!source) {
-					this._sendJson(res, 404, { error: `Active chat request not found: ${requestId}` });
+					// Requests started in the VS Code UI are not represented by a bridge
+					// CancellationTokenSource. Use VS Code's native stop action so a
+					// reattached mobile client can still stop the visible active request.
+					await vscode.commands.executeCommand('workbench.action.chat.cancel');
+					this._sendJson(res, 200, { success: true, requestId, native: true });
 					return;
 				}
 				source.cancel();
@@ -615,20 +622,9 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 	}
 
 	private async _getSession(id: string): Promise<RemoteBridgeSessionInfo | undefined> {
-		const activeResource = vscode.window.activeChatPanelSessionResource?.toString();
-		const activeSnapshot = activeResource ? remoteChatState.get(activeResource) : undefined;
-		if (activeResource && activeSnapshot?.messages.length && (activeResource === id || activeResource.endsWith(id) || activeResource.includes(id))) {
-			return {
-				id,
-				title: activeSnapshot.messages.find(message => message.role === 'user')?.content.slice(0, 80) || id,
-				source: 'vscodeChatSession',
-				filePath: '',
-				workspaceName: vscode.workspace.name,
-				updatedAt: activeSnapshot.updatedAt,
-				requestCount: activeSnapshot.messages.filter(message => message.role === 'user').length,
-				messages: activeSnapshot.messages.filter(message => message.content.trim()),
-			};
-		}
+		// Session detail must always come from the canonical persisted transcript.
+		// The live snapshot only contains events observed after the bridge started
+		// and returning it here silently discards earlier response parts.
 		const files = (await this._findSessionFiles()).sort((a, b) => Number(b.source === 'vscodeChatSession') - Number(a.source === 'vscodeChatSession'));
 		for (const file of files) {
 			const fileId = path.basename(file.filePath).replace(/\.jsonl?$/i, '');
@@ -728,6 +724,13 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 
 		const state = file.filePath.endsWith('.jsonl') ? this._replayJsonlState(raw) : JSON.parse(raw);
 		const requests = Array.isArray(state.requests) ? state.requests : [];
+		const pendingRequests = Array.isArray(state.pendingRequests) ? state.pendingRequests : [];
+		const pending = pendingRequests.at(-1);
+		const activeRequestId = typeof pending === 'string'
+			? pending
+			: pending && typeof pending === 'object'
+				? String(pending.id ?? pending.requestId ?? '') || undefined
+				: undefined;
 		const messages = includeMessages ? this._readVsCodeChatMessages(requests) : undefined;
 		return {
 			id: String(state.sessionId || id),
@@ -739,6 +742,8 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 			updatedAt: stat.mtimeMs,
 			createdAt: typeof state.creationDate === 'number' ? state.creationDate : stat.birthtimeMs,
 			requestCount: requests.length,
+			status: pendingRequests.length ? 'running' : 'completed',
+			activeRequestId,
 			messages,
 		};
 	}
@@ -856,12 +861,12 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 					flushText();
 					const filePath = String(part.uri?.fsPath ?? part.uri?.path ?? '');
 					const edits = Array.isArray(part.edits) ? part.edits.flat().filter(Boolean) as Array<Record<string, any>> : [];
-					const output = edits.map(edit => {
+					const output = this._limitSessionText(edits.map(edit => {
 						const range = edit.range as Record<string, unknown> | undefined;
 						const start = range?.startLineNumber;
 						const end = range?.endLineNumber;
 						return `${start ? `@@ ${start}${end && end !== start ? `-${end}` : ''} @@\n` : ''}${String(edit.text ?? '')}`;
-					}).join('\n\n').slice(0, 20_000);
+					}).join('\n\n'));
 					messages.push({
 						id: `${requestId}:edit:${partIndex++}`, role: 'assistant',
 						content: filePath ? `编辑 ${path.basename(filePath)}` : '编辑文件',
@@ -889,11 +894,17 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 						toolStatus: failed ? 'error' : complete ? 'completed' : 'running', toolInput, toolOutput,
 					});
 				} else if (normalizedKind.includes('reference') || normalizedKind.includes('anchor') || normalizedKind.includes('citation')) {
-					const target = part.value2 ?? part.value?.value ?? part.value;
+					const reference = part.inlineReference ?? part.reference ?? part.anchor ?? part.citation;
+					const target = reference?.location?.uri ?? reference?.uri ?? reference ?? part.value2 ?? part.value?.value ?? part.value;
 					const uri = this._uriText(target);
-					const label = String(part.title ?? part.value?.variableName ?? this._uriLabel(target) ?? uri ?? '引用');
+					const label = String(part.title ?? reference?.name ?? part.value?.variableName ?? this._uriLabel(target) ?? uri ?? '引用');
+					const line = reference?.location?.range?.startLineNumber;
+					const destination = uri && typeof line === 'number' ? `${uri}#L${line}` : uri;
 					const snippet = typeof part.snippet === 'string' && part.snippet ? `\n\n\`\`\`\n${part.snippet}\n\`\`\`` : '';
-					textBuffer += uri ? `\n\n> 引用：[${this._escapeMarkdown(label)}](${uri})${snippet}\n` : `\n\n> 引用：${label}${snippet}\n`;
+					textBuffer += destination ? `\n\n> 引用：[${this._escapeMarkdown(label)}](${destination})${snippet}\n` : `\n\n> 引用：${label}${snippet}\n`;
+				} else if (normalizedKind === 'warning') {
+					const warning = value || this._sessionPartText(part.content);
+					if (warning && !this._isInternalChatNoise(warning)) textBuffer += `\n\n> ⚠ ${warning}\n`;
 				} else if (value && !this._isInternalChatNoise(value) && (!kind || normalizedKind.includes('markdown') || normalizedKind === 'text')) {
 					textBuffer += value;
 				}
@@ -916,7 +927,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		if (Array.isArray(value)) return value.map(item => this._sessionPartText(item)).filter(Boolean).join('\n');
 		if (value && typeof value === 'object') {
 			const nested = value as Record<string, unknown>;
-			return this._sessionPartText(nested.value ?? nested.text ?? nested.message);
+			return this._sessionPartText(nested.value ?? nested.text ?? nested.message ?? nested.content ?? nested.children ?? nested.parts);
 		}
 		return '';
 	}
@@ -924,8 +935,12 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 	private _sessionToolText(value: unknown): string | undefined {
 		if (value === undefined || value === null) return undefined;
 		const text = this._sessionPartText(value);
-		if (text) return text.slice(0, 20_000);
-		try { return JSON.stringify(value, null, 2).slice(0, 20_000); } catch { return String(value).slice(0, 20_000); }
+		if (text) return this._limitSessionText(text);
+		try { return this._limitSessionText(JSON.stringify(value, null, 2)); } catch { return this._limitSessionText(String(value)); }
+	}
+
+	private _limitSessionText(value: string, limit = 200_000): string {
+		return value.length <= limit ? value : `${value.slice(0, limit)}\n\n…内容过长，已显示前 ${limit} / ${value.length} 个字符`;
 	}
 
 	private _isInternalChatNoise(value: string): boolean {
@@ -933,9 +948,10 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 	}
 
 	private _uriText(value: any): string | undefined {
-		const target = value?.uri ?? value;
+		const target = value?.location?.uri ?? value?.uri ?? value;
 		if (!target) return undefined;
 		if (typeof target === 'string') return target;
+		if (typeof target.external === 'string' && target.external) return target.external;
 		if (typeof target.scheme === 'string' && typeof target.path === 'string') {
 			const authority = typeof target.authority === 'string' && target.authority ? `//${target.authority}` : '';
 			return `${target.scheme}:${authority}${target.path}`;

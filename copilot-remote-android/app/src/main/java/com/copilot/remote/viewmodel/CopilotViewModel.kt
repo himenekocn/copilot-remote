@@ -301,6 +301,7 @@ class CopilotViewModel(
 
             "activeChatSession", "activeSessionChanged" -> {
                 val sessionResource = json.optString("sessionResource")
+                val officialSessionId = json.optString("sessionId")
                 val snapshot = json.optJSONObject("snapshot")
                 val snapshotModelId = snapshot?.optString("modelId").orEmpty()
                 val snapshotReasoningEffort = snapshot?.optString("reasoningEffort").orEmpty()
@@ -318,15 +319,16 @@ class CopilotViewModel(
                                 maxInputTokens = usage.optInt("maxInputTokens", snapshot.optInt("maxInputTokens")),
                             )
                         }
+                        val belongsToVisibleConversation = conn.activeNativeChatSessionId.isBlank() || officialSessionId.isBlank() || conn.activeNativeChatSessionId == officialSessionId
                         conn.copy(
                         activeOfficialSessionResource = sessionResource,
                         activeResponseModelId = snapshotModelId.ifBlank { conn.activeResponseModelId },
                         activeReasoningEffort = snapshotReasoningEffort,
                         activeRequestId = snapshot.optString("requestId"),
-                        chatMessages = snapshotMessages,
-                        chatTodos = snapshotTodos,
+                        chatMessages = if (belongsToVisibleConversation) snapshotMessages else conn.chatMessages,
+                        chatTodos = if (belongsToVisibleConversation) snapshotTodos else conn.chatTodos,
                         chatUsage = snapshotUsage ?: conn.chatUsage,
-                        isSending = snapshot.optString("status") == "running",
+                        isSending = belongsToVisibleConversation && snapshot.optString("status") == "running",
                     )
                     }
                 }
@@ -1830,7 +1832,7 @@ class CopilotViewModel(
         val messages = snapshot.optJSONArray("messages") ?: return emptyList()
         val runningRequestId = snapshot.optString("requestId")
         val isRunning = snapshot.optString("status") == "running"
-        return (0 until messages.length()).map { index ->
+        val parsed = (0 until messages.length()).map { index ->
             val message = messages.getJSONObject(index)
             val id = message.optString("id").ifBlank { "snapshot:$index" }
             ChatMessage(
@@ -1838,14 +1840,24 @@ class CopilotViewModel(
                 role = message.optString("role"),
                 content = message.optString("content"),
                 timestamp = message.optLong("timestamp", System.currentTimeMillis()),
-                isStreaming = isRunning && index == messages.length() - 1 && id.startsWith("$runningRequestId:assistant:"),
+                isStreaming = isRunning && index == messages.length() - 1 && (runningRequestId.isBlank() || id.startsWith("$runningRequestId:assistant:")),
                 kind = message.optString("kind", "message"),
                 toolName = message.optString("toolName"),
                 toolStatus = message.optString("toolStatus"),
                 toolInput = message.optString("toolInput"),
                 toolOutput = message.optString("toolOutput"),
             )
+        }.toMutableList()
+        if (isRunning && parsed.none { it.isStreaming }) {
+            parsed += ChatMessage(
+                id = "${runningRequestId.ifBlank { "active" }}:assistant:pending",
+                role = "assistant",
+                content = "",
+                timestamp = System.currentTimeMillis(),
+                isStreaming = true,
+            )
         }
+        return parsed
     }
 
     private fun parseTodoItems(items: JSONArray?): List<ChatTodoItem> {

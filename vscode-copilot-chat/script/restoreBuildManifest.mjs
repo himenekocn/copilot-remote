@@ -5,7 +5,10 @@ const lockPath = new URL('../package-lock.json', import.meta.url);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
 const rootPackage = lock.packages?.[''];
-const patchedVersion = process.env.COPILOT_CHAT_PATCHED_VERSION || '0.57.1';
+// Keep the patched build above the matching Marketplace release. Using the
+// exact upstream version lets VS Code extension sync/auto-update silently
+// replace this VSIX with the official package, removing Remote Bridge.
+const patchedVersion = process.env.COPILOT_CHAT_PATCHED_VERSION || '0.57.100';
 
 // The patched extension must be newer than VS Code's bundled Copilot Chat,
 // otherwise VS Code rejects the VSIX as a downgrade before it can be enabled.

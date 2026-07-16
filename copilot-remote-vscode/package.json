@@ -2,7 +2,7 @@
   "name": "copilot-remote",
   "displayName": "Copilot Remote Control",
   "description": "Expose GitHub Copilot's full functionality via WebSocket API for remote control from mobile devices",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "publisher": "copilot-remote",
   "license": "MIT",
   "repository": {

@@ -28,11 +28,11 @@ import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun RichMessageContent(message: ChatMessage) {
+fun RichMessageContent(message: ChatMessage, onOpenReference: (String) -> Unit = {}) {
     when (message.kind) {
         "thinking" -> ThinkingBlock(message)
         "tool" -> ToolCallBlock(message)
-        else -> MarkdownBody(message.content.ifBlank { if (message.isStreaming) "正在思考…" else "" })
+        else -> MarkdownBody(message.content.ifBlank { if (message.isStreaming) "正在思考…" else "" }, onOpenReference = onOpenReference)
     }
 }
 
@@ -181,7 +181,7 @@ private fun ToolCallBlock(message: ChatMessage) {
 private data class MarkdownSegment(val text: String, val language: String? = null)
 
 @Composable
-fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
+fun MarkdownBody(markdown: String, modifier: Modifier = Modifier, onOpenReference: (String) -> Unit = {}) {
     val segments = remember(markdown) { splitMarkdown(markdown) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(7.dp)) {
         segments.forEach { segment ->
@@ -193,6 +193,7 @@ fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
                 while (lineIndex < lines.size) {
                     val raw = lines[lineIndex]
                     val line = raw.trimEnd()
+                    val reference = parseReference(line)
                     if (line.contains('|') && lineIndex + 1 < lines.size && isMarkdownTableSeparator(lines[lineIndex + 1])) {
                         val tableLines = mutableListOf(line, lines[lineIndex + 1])
                         lineIndex += 2
@@ -219,6 +220,24 @@ fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
                                 SelectionContainer { Text(inlineMarkdown(line.substring(marker?.range?.last?.plus(1) ?: 0).trimStart()), modifier = Modifier.weight(1f)) }
                             }
                         }
+                        reference != null -> {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().clickable { onOpenReference(reference.uri) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = MiuixTheme.colorScheme.surfaceContainer,
+                                border = BorderStroke(1.dp, MiuixTheme.colorScheme.dividerLine),
+                            ) {
+                                Row(Modifier.padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Description, null, Modifier.size(19.dp), tint = MiuixTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(reference.label, style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.SemiBold)
+                                        Text(reference.uri, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary, maxLines = 1)
+                                    }
+                                    Icon(Icons.Default.OpenInNew, "在 VS Code 中打开", Modifier.size(18.dp))
+                                }
+                            }
+                        }
                         line.startsWith("> ") -> Surface(shape = RoundedCornerShape(8.dp), color = MiuixTheme.colorScheme.surfaceContainer) {
                             SelectionContainer { Text(inlineMarkdown(line.removePrefix("> ")), modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp), color = MiuixTheme.colorScheme.onSurfaceSecondary) }
                         }
@@ -229,6 +248,14 @@ fun MarkdownBody(markdown: String, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+private data class MarkdownReference(val label: String, val uri: String)
+
+private fun parseReference(line: String): MarkdownReference? {
+    if (!line.trimStart().startsWith("> 引用：")) return null
+    val match = Regex("\\[([^]]+)]\\(([^)]+)\\)").find(line) ?: return null
+    return MarkdownReference(match.groupValues[1], match.groupValues[2])
 }
 
 @Composable

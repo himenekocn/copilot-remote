@@ -83,7 +83,7 @@ fun AppNavigation(viewModel: CopilotViewModel) {
             containerColor = MiuixTheme.colorScheme.background,
         ) { padding ->
             NavHost(nav, if (state.connectionState == ConnectionState.AUTHENTICATED) Screen.Chat.route else Screen.Settings.route, Modifier.padding(padding).consumeWindowInsets(padding)) {
-                composable(Screen.Chat.route) { ChatScreen(viewModel, onOpenNavigation = { drawerOpen = true }) }
+                composable(Screen.Chat.route) { ChatScreen(viewModel, onOpenNavigation = if (tablet) null else ({ drawerOpen = true })) }
                 composable(Screen.Explorer.route) { ExplorerScreen(viewModel) }
                 composable(Screen.Workspace.route) { WorkspaceScreen(viewModel) }
                 composable(Screen.Terminal.route) { TerminalScreen(viewModel) }
@@ -102,7 +102,13 @@ fun AppNavigation(viewModel: CopilotViewModel) {
 
     Box(Modifier.fillMaxSize()) {
         if (tablet) Row(Modifier.fillMaxSize()) {
-            ChatSidebar(viewModel, state, route, navigate, Modifier.width(320.dp).fillMaxHeight())
+            Surface(
+                modifier = Modifier.width(300.dp).fillMaxHeight(),
+                color = MiuixTheme.colorScheme.surface,
+                contentColor = MiuixTheme.colorScheme.onSurface,
+            ) {
+                ChatSidebar(viewModel, state, route, navigate, Modifier.fillMaxSize())
+            }
             VerticalDivider()
             Box(Modifier.weight(1f).fillMaxHeight()) { content() }
         } else Box(Modifier.fillMaxSize()) {
