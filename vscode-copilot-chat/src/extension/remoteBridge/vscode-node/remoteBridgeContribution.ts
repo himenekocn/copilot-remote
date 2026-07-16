@@ -174,6 +174,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 			if (req.method === 'GET' && url.pathname === '/models') {
 				const models = await vscode.lm.selectChatModels({});
 				const endpoints = await this._endpointProvider.getAllChatEndpoints();
+				const configuredModels = vscode.workspace.getConfiguration('oaicopilot').get<ReadonlyArray<{ id?: string; displayName?: string; reasoning_effort?: string }>>('models', []);
 				this._sendJson(res, 200, {
 					models: models.map(model => {
 						const normalize = (value: string | undefined) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -182,7 +183,21 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 							const endpointKeys = [item.model, item.name, item.family].map(normalize).filter(Boolean);
 							return endpointKeys.some(key => modelKeys.includes(key));
 						});
-						const declaredEfforts = endpoint?.supportsReasoningEffort || [];
+						const modelSchema = (model as vscode.LanguageModelChat & { configurationSchema?: vscode.LanguageModelConfigurationSchema }).configurationSchema;
+						const schemaEfforts = modelSchema?.properties?.reasoningEffort?.enum;
+						const configuredModel = configuredModels.find(item => [item.id, item.displayName].map(normalize).filter(Boolean).some(key => modelKeys.includes(key)));
+						// VS Code currently does not expose a provider's configuration schema on
+						// LanguageModelChat in every build. The provider setting is only a fallback;
+						// capabilities declared by the selected model or Copilot endpoint win.
+						const providerEfforts = configuredModel?.reasoning_effort
+							? ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+							: [];
+						const endpointEfforts = endpoint?.supportsReasoningEffort || [];
+						const declaredEfforts = model.id.toLowerCase() === 'auto'
+							? []
+							: Array.isArray(schemaEfforts)
+							? schemaEfforts.filter((value): value is string => typeof value === 'string')
+							: endpointEfforts.length > 0 ? endpointEfforts : providerEfforts;
 						return {
 						id: model.id,
 						name: model.name,
@@ -220,7 +235,28 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 
 			if (req.method === 'GET' && url.pathname === '/chat/active-session') {
 				const sessionResource = vscode.window.activeChatPanelSessionResource?.toString();
-				const snapshot = sessionResource ? remoteChatState.get(sessionResource) : undefined;
+				let snapshot = sessionResource ? remoteChatState.get(sessionResource) : undefined;
+				if (sessionResource) {
+					const persisted = await this._getSession(this._sessionIdFromResource(sessionResource));
+					if (persisted?.messages) {
+						const persistedMessages = persisted.messages.map(message => ({ ...message, role: message.role === 'tool' ? 'assistant' as const : message.role }));
+						if (snapshot?.status === 'running' && snapshot.requestId) {
+							const requestPrefix = `${snapshot.requestId}:`;
+							const history = persistedMessages.filter(message => !message.id.startsWith(requestPrefix));
+							const current = snapshot.messages.filter(message => message.id.startsWith(requestPrefix));
+							snapshot = { ...snapshot, messages: [...history, ...current] };
+						} else {
+							snapshot = {
+								...snapshot,
+								sessionResource,
+								status: snapshot?.status === 'error' ? 'error' : 'completed',
+								todos: snapshot?.todos ?? [],
+								messages: persistedMessages,
+								updatedAt: persisted.updatedAt,
+							};
+						}
+					}
+				}
 				this._sendJson(res, 200, { active: Boolean(sessionResource), sessionResource, snapshot });
 				return;
 			}
@@ -377,7 +413,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		const modelId = typeof body.modelId === 'string' && body.modelId ? body.modelId : undefined;
 		const participant = typeof body.participant === 'string' && body.participant.trim() ? body.participant.trim() : undefined;
 		const rawReasoningEffort = typeof body.reasoningEffort === 'string' && body.reasoningEffort ? body.reasoningEffort : undefined;
-		const reasoningEffort = rawReasoningEffort === 'max' ? 'xhigh' : rawReasoningEffort;
+		const reasoningEffort = rawReasoningEffort;
 		const permissionLevel = body.permissionLevel === 'autoApprove' || body.permissionLevel === 'autopilot' ? body.permissionLevel : undefined;
 		const enabledTools = Array.isArray(body.enabledTools) ? body.enabledTools.filter((tool): tool is string => typeof tool === 'string') : undefined;
 		const models = modelId ? await vscode.lm.selectChatModels({ id: modelId }) : [];
@@ -395,11 +431,22 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		});
 		res.flushHeaders();
 		const writeEvent = (event: unknown) => res.write(`${JSON.stringify(event)}\n`);
+		let officialRequestId: string | undefined;
 		const listener = remoteChatState.listen(event => {
 			if ('sessionResource' in event && event.sessionResource !== activeSessionResource) return;
-			if (event.type === 'chatStart') writeEvent({ ...event, requestId, officialRequestId: event.requestId });
-			else if (event.type !== 'activeSessionChanged') writeEvent({ ...event, requestId, officialRequestId: 'requestId' in event ? event.requestId : undefined });
+			if (event.type === 'chatStart') {
+				if (officialRequestId && event.requestId !== officialRequestId) return;
+				officialRequestId = event.requestId;
+				writeEvent({ ...event, requestId, officialRequestId: event.requestId });
+			} else if (event.type !== 'activeSessionChanged') {
+				const eventRequestId = 'requestId' in event ? event.requestId : undefined;
+				// A steering prompt starts a second request in the same chat session. Keep
+				// this HTTP stream attached to the request that originally opened it.
+				if (officialRequestId && eventRequestId && eventRequestId !== officialRequestId) return;
+				writeEvent({ ...event, requestId, officialRequestId: eventRequestId });
+			}
 			if (event.type === 'chatDone' || event.type === 'chatError' || event.type === 'chatCancelled') {
+				if (officialRequestId && event.requestId !== officialRequestId) return;
 				listener.dispose();
 				res.end();
 			}
@@ -598,6 +645,17 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		return undefined;
 	}
 
+	private _sessionIdFromResource(sessionResource: string): string {
+		const encoded = sessionResource.split('/').filter(Boolean).pop();
+		if (!encoded) return sessionResource;
+		try {
+			const decoded = Buffer.from(encoded, 'base64url').toString('utf8').trim();
+			return /^[0-9a-f-]{36}$/i.test(decoded) ? decoded : encoded;
+		} catch {
+			return encoded;
+		}
+	}
+
 	private async _findSessionFiles(): Promise<Array<{ filePath: string; source: RemoteBridgeSessionInfo['source']; workspaceName?: string; workspaceFolder?: string }>> {
 		const files: Array<{ filePath: string; source: RemoteBridgeSessionInfo['source']; workspaceName?: string; workspaceFolder?: string }> = [];
 		const storageUri = this._context.storageUri;
@@ -715,13 +773,13 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 			} else if (item.kind === 1 && Array.isArray(item.k)) {
 				this._setDeepValue(state, item.k, item.v);
 			} else if (item.kind === 2 && Array.isArray(item.k)) {
-				this._appendDeepValue(state, item.k, item.v);
+				this._appendDeepValue(state, item.k, item.v, typeof item.i === 'number' ? item.i : undefined);
 			}
 		}
 		return state;
 	}
 
-	private _appendDeepValue(target: Record<string, any>, keys: unknown[], value: unknown): void {
+	private _appendDeepValue(target: Record<string, any>, keys: unknown[], value: unknown, replaceFrom?: number): void {
 		let current: any = target;
 		for (let i = 0; i < keys.length - 1; i++) {
 			const key = keys[i] as string | number;
@@ -733,7 +791,14 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		}
 		const key = keys[keys.length - 1] as string | number;
 		if (Array.isArray(current[key]) && Array.isArray(value)) {
-			current[key].push(...value);
+			if (replaceFrom === undefined) {
+				current[key].push(...value);
+			} else {
+				// VS Code's JSONL delta format uses `i` to replace the tail of an
+				// array. Treating this as an append retains superseded retries and
+				// shifts every later request/result index.
+				current[key].splice(replaceFrom, current[key].length - replaceFrom, ...value);
+			}
 		} else {
 			current[key] = value;
 		}
@@ -834,6 +899,10 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 				}
 			}
 			flushText();
+			const error = typeof request.result?.errorDetails?.message === 'string' ? request.result.errorDetails.message.trim() : '';
+			if (error && !messages.some(message => message.id.startsWith(`${requestId}:error:`) || message.content.includes(error))) {
+				messages.push({ id: `${requestId}:error:${partIndex++}`, role: 'assistant', content: error, timestamp: timestamp + partIndex, modelId, kind: 'message' });
+			}
 			if (!response.length) {
 				const assistant = this._resultText(request.result);
 				if (assistant) messages.push({ id: `${requestId}:assistant`, role: 'assistant', content: assistant, timestamp: timestamp + 1, modelId, kind: 'message' });

@@ -1485,10 +1485,17 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 
 		// Report token usage to the stream for rendering the context window widget
 		const stream = streamParticipants[streamParticipants.length - 1];
-		if (fetchResult.type === ChatFetchResponseType.Success && fetchResult.usage && stream && this.shouldReportUsageToContextWidget()) {
+		if (fetchResult.type === ChatFetchResponseType.Success && stream && this.shouldReportUsageToContextWidget()) {
+			// Some OpenAI-compatible providers omit streaming usage or return zeroes.
+			// We already tokenized the exact prompt and tools above, so use that count
+			// instead of leaving VS Code's context-window widget at 0/max.
+			const reportedPromptTokens = fetchResult.usage?.prompt_tokens;
+			const promptTokens = typeof reportedPromptTokens === 'number' && reportedPromptTokens > 0
+				? reportedPromptTokens
+				: promptTokenLength + toolTokenCount;
 			stream.usage({
-				completionTokens: fetchResult.usage.completion_tokens,
-				promptTokens: fetchResult.usage.prompt_tokens,
+				completionTokens: fetchResult.usage?.completion_tokens ?? 0,
+				promptTokens,
 				outputBuffer: endpoint.maxOutputTokens,
 				promptTokenDetails,
 			});

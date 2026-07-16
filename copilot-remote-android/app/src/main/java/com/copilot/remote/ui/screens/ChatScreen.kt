@@ -47,13 +47,20 @@ import com.copilot.remote.data.ChatTodoItem
 import com.copilot.remote.data.ModelInfo
 import com.copilot.remote.data.effectiveReasoningEfforts
 import com.copilot.remote.viewmodel.CopilotViewModel
+import kotlinx.coroutines.flow.first
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.extra.SuperDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     val state by viewModel.uiState.collectAsState()
+    val darkMode = isSystemInDarkTheme()
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val timeline = remember(state.chatMessages) { buildChatTimeline(state.chatMessages) }
@@ -82,11 +89,23 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     LaunchedEffect(state.pendingCaptureAttachment) { state.pendingCaptureAttachment?.let { attachments = attachments + it; viewModel.consumeCaptureAttachment() } }
     LaunchedEffect(state.pendingTerminalAttachment) { state.pendingTerminalAttachment?.let { attachments = attachments + it; viewModel.consumeTerminalAttachment() } }
     LaunchedEffect(Unit) { viewModel.refreshSlashCommands() }
-    LaunchedEffect(timeline.size, state.chatMessages.lastOrNull()?.content?.length, state.chatTodos) {
-        if (timeline.isNotEmpty() || state.chatTodos.isNotEmpty()) {
+    LaunchedEffect(timeline.size, state.chatMessages.lastOrNull()?.id, state.chatMessages.lastOrNull()?.content?.length) {
+        if (timeline.isNotEmpty()) {
+            // Wait until LazyColumn has measured the newly received timeline.
+            // During cold start it initially exposes the cached item count, which
+            // can omit the final response even though state already contains it.
+            val itemCount = snapshotFlow { listState.layoutInfo.totalItemsCount }
+                .first { it >= timeline.size }
             withFrameNanos { }
-            val lastItem = listState.layoutInfo.totalItemsCount - 1
-            if (lastItem >= 0) listState.animateScrollToItem(lastItem)
+            val lastIndex = itemCount - 1
+            // First bring the final item into the measured viewport, then move to
+            // the real scroll limit. LazyColumn cannot calculate that limit while
+            // the final process/message cards are still virtualized.
+            listState.scrollToItem(lastIndex)
+            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == lastIndex && it.size > 0 } }
+                .first { it }
+            withFrameNanos { }
+            listState.scrollToItem(lastIndex, Int.MAX_VALUE)
         }
     }
     val send = {
@@ -98,7 +117,7 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     }
     val canSubmit = state.isSending || input.isNotBlank() || attachments.isNotEmpty()
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxSize().background(chatPageColor(darkMode)), contentAlignment = Alignment.TopCenter) {
       Column(Modifier.fillMaxHeight().widthIn(max = 900.dp).fillMaxWidth().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onOpenNavigation, modifier = Modifier.size(52.dp), backgroundColor = MiuixTheme.colorScheme.surfaceContainer) { Icon(Icons.Default.ArrowBack, "打开导航", modifier = Modifier.size(25.dp)) }
@@ -112,7 +131,13 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                         ?: firstUserMessage?.takeIf { it.isNotBlank() }
                         ?: "新对话"
                     Text(activeTitle, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(state.connectedWorkspaceName.ifBlank { "Copilot" }, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary, maxLines = 1)
+                    val latestDate = state.chatMessages.lastOrNull()?.timestamp?.let(::formatHeaderDate)
+                    Text(
+                        listOfNotNull(state.connectedWorkspaceName.ifBlank { "Copilot" }, latestDate).joinToString(" · "),
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MiuixTheme.colorScheme.onSurfaceSecondary,
+                        maxLines = 1,
+                    )
                 }
             }
             Surface(shape = RoundedCornerShape(25.dp), color = MiuixTheme.colorScheme.surfaceContainer) {
@@ -146,7 +171,9 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                 }
             } else if (state.chatMessages.isEmpty()) item { EmptyConversation() }
             items(timeline, key = { it.id }) { entry ->
-                if (entry.isProcess) {
+                if (entry.dateLabel != null) {
+                    DateSeparator(entry.dateLabel)
+                } else if (entry.isProcess) {
                     ProcessMessageGroup(entry.messages)
                 } else {
                     val message = entry.messages.first()
@@ -323,7 +350,15 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     SuperDialog(show = showSessions, title = "VS Code 对话", onDismissRequest = { showSessions = false }) {
         LazyColumn(Modifier.heightIn(max = 520.dp)) {
             item { Button(onClick = viewModel::refreshNativeChatSessions, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("刷新") } }
-            items(state.nativeChatSessions, key = { it.id }) { session -> BasicComponent(title = session.title.takeUnless { it.isBlank() || it == session.id || it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: "未命名对话", summary = session.workspaceName ?: session.source, onClick = { viewModel.selectNativeChatSession(session.id); showSessions = false }) }
+            items(state.nativeChatSessions, key = { it.id }) { session ->
+                val date = formatConversationDate(session.updatedAt.takeIf { it > 0 } ?: session.createdAt)
+                val location = session.workspaceName ?: session.source
+                BasicComponent(
+                    title = session.title.takeUnless { it.isBlank() || it == session.id || it.matches(Regex("[0-9a-fA-F-]{36}")) } ?: "未命名对话",
+                    summary = listOfNotNull(date, location.takeIf { it.isNotBlank() }).joinToString(" · "),
+                    onClick = { viewModel.selectNativeChatSession(session.id); showSessions = false },
+                )
+            }
         }
     }
     previewAttachment?.let { attachment ->
@@ -430,18 +465,32 @@ private data class ChatTimelineEntry(
     val id: String,
     val messages: List<ChatMessage>,
     val isProcess: Boolean,
+    val dateLabel: String? = null,
 )
 
 private fun buildChatTimeline(messages: List<ChatMessage>): List<ChatTimelineEntry> {
     val result = mutableListOf<ChatTimelineEntry>()
     val process = mutableListOf<ChatMessage>()
+	var processRequestId: String? = null
+    var activeDate: LocalDate? = null
     fun flushProcess() {
         if (process.isEmpty()) return
         result += ChatTimelineEntry("process:${process.first().id}", process.toList(), true)
         process.clear()
+		processRequestId = null
     }
     messages.forEach { message ->
-        if (message.kind == "tool" || message.kind == "thinking") {
+        val messageDate = messageDate(message.timestamp)
+        if (messageDate != activeDate) {
+            flushProcess()
+            activeDate = messageDate
+            result += ChatTimelineEntry("date:$messageDate", emptyList(), false, formatDateSeparator(messageDate))
+        }
+		if (message.kind == "thinking" && message.content.isBlank()) return@forEach
+		if (message.kind == "tool" || message.kind == "thinking") {
+			val requestId = message.id.substringBefore(':')
+			if (process.isNotEmpty() && processRequestId != requestId) flushProcess()
+			processRequestId = requestId
             process += message
         } else {
             flushProcess()
@@ -450,6 +499,51 @@ private fun buildChatTimeline(messages: List<ChatMessage>): List<ChatTimelineEnt
     }
     flushProcess()
     return result
+}
+
+@Composable
+private fun DateSeparator(label: String) {
+    val darkMode = isSystemInDarkTheme()
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(1.dp).background(if (darkMode) Color(0xFF343A43) else Color(0xFFD6DCE5)))
+        Surface(shape = RoundedCornerShape(12.dp), color = if (darkMode) Color(0xFF20252C) else Color(0xFFE8EDF4)) {
+            Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+        }
+        Box(Modifier.weight(1f).height(1.dp).background(if (darkMode) Color(0xFF343A43) else Color(0xFFD6DCE5)))
+    }
+}
+
+private val conversationDateFormatter = DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.SIMPLIFIED_CHINESE)
+private val shortConversationDateFormatter = DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.SIMPLIFIED_CHINESE)
+
+private fun messageDate(timestamp: Long): LocalDate {
+    val safeTimestamp = timestamp.takeIf { it >= 946684800000L } ?: System.currentTimeMillis()
+    return Instant.ofEpochMilli(safeTimestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+}
+
+private fun formatDateSeparator(date: LocalDate): String {
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "今天 · ${date.format(shortConversationDateFormatter)}"
+        today.minusDays(1) -> "昨天 · ${date.format(shortConversationDateFormatter)}"
+        else -> date.format(if (date.year == today.year) shortConversationDateFormatter else conversationDateFormatter)
+    }
+}
+
+private fun formatConversationDate(timestamp: Long): String? {
+    if (timestamp < 946684800000L) return null
+    val date = messageDate(timestamp)
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "今天"
+        today.minusDays(1) -> "昨天"
+        else -> date.format(DateTimeFormatter.ofPattern(if (date.year == today.year) "M月d日" else "yyyy年M月d日", Locale.SIMPLIFIED_CHINESE))
+    }
+}
+
+private fun formatHeaderDate(timestamp: Long): String? {
+    if (timestamp < 946684800000L) return null
+    return messageDate(timestamp).format(DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.SIMPLIFIED_CHINESE))
 }
 
 @Composable
@@ -516,9 +610,10 @@ private fun TodoProgressCard(items: List<ChatTodoItem>, isRunning: Boolean) {
 @Composable
 private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
     val user = message.role == "user"
+    val darkMode = isSystemInDarkTheme()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (user) {
-            Card(modifier = Modifier.widthIn(max = 680.dp).wrapContentWidth(), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)) {
+            Card(modifier = Modifier.widthIn(max = 680.dp).wrapContentWidth(), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = if (darkMode) Color(0xFF253B55) else Color(0xFFDDEBFF))) {
                 MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else if (message.kind == "tool" || message.kind == "thinking") {
@@ -526,12 +621,20 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAtta
                 MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else {
-            Box(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp)) {
-                MessageContent(message, onRetry, onPreviewAttachment)
+            Surface(
+                modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = if (darkMode) Color(0xFF191D22) else Color(0xFFFFFFFF),
+            ) {
+                Box(Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
+                    MessageContent(message, onRetry, onPreviewAttachment)
+                }
             }
         }
     }
 }
+
+private fun chatPageColor(darkMode: Boolean) = if (darkMode) Color(0xFF101317) else Color(0xFFF3F5F8)
 
 @Composable
 private fun MessageContent(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
@@ -557,6 +660,7 @@ private fun effectiveReasoningEfforts(model: ModelInfo?): List<String> {
 }
 
 private fun reasoningEffortLabel(value: String) = when (value.lowercase()) {
+	"minimal" -> "最小"
     "none" -> "关闭"
     "low" -> "低"
     "medium" -> "中"

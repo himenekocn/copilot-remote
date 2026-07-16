@@ -356,6 +356,9 @@ class CopilotViewModel(
                     val isLocalRequest = conn.activeRequestId.isNotBlank() && requestId == conn.activeRequestId
                     val prompt = json.optString("prompt")
                     val messages = conn.chatMessages.toMutableList()
+					if (conn.activeRequestId.isNotBlank() && conn.activeRequestId != requestId) {
+						finalizeStreamingMessages(messages, conn.activeRequestId)
+					}
                     if (!isLocalRequest && prompt.isNotBlank()) {
                         messages.add(ChatMessage("user", prompt, id = "$requestId:user"))
                     }
@@ -511,14 +514,13 @@ class CopilotViewModel(
             "chatCancelled" -> {
                 updateConnection(profileId) { conn ->
                     val messages = conn.chatMessages.toMutableList()
-                    val lastIdx = messages.indexOfLast { it.isStreaming }
-                    if (lastIdx >= 0) {
-                        messages[lastIdx] = messages[lastIdx].copy(
-                            content = messages[lastIdx].content + " [cancelled]",
-                            isStreaming = false
-                        )
-                    }
-                    updateActiveSessionMessages(conn, messages).copy(isSending = false, activeRequestId = "")
+					val requestId = json.optString("requestId")
+					finalizeStreamingMessages(messages, requestId)
+					val isActiveRequest = requestId.isBlank() || conn.activeRequestId == requestId
+					updateActiveSessionMessages(conn, messages).copy(
+						isSending = if (isActiveRequest) false else conn.isSending,
+						activeRequestId = if (isActiveRequest) "" else conn.activeRequestId,
+					)
                 }
                 stopTodoPolling(profileId)
             }
@@ -1807,6 +1809,15 @@ class CopilotViewModel(
         if (streaming.content.isBlank()) messages.removeAt(streamingIndex)
         else messages[streamingIndex] = streaming.copy(isStreaming = false)
     }
+
+	private fun finalizeStreamingMessages(messages: MutableList<ChatMessage>, requestId: String) {
+		for (index in messages.indices.reversed()) {
+			val message = messages[index]
+			if (!message.isStreaming || (requestId.isNotBlank() && !message.id.startsWith("$requestId:"))) continue
+			if (message.content.isBlank()) messages.removeAt(index)
+			else messages[index] = message.copy(isStreaming = false)
+		}
+	}
 
     private fun appendStreamingResponse(messages: MutableList<ChatMessage>, profileId: String, requestId: String) {
         val key = "$profileId:$requestId"

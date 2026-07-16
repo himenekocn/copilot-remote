@@ -82,10 +82,10 @@ class RemoteChatState {
 		return configuration;
 	}
 
-	start(request: vscode.ChatRequest, history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[]): void {
+	start(request: vscode.ChatRequest, history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[], participantId: string): void {
 		const sessionResource = request.sessionResource.toString();
 		const previous = this._sessions.get(sessionResource)?.messages;
-		const messages = previous?.length ? previous.map(message => ({ ...message })) : this._historyMessages(history);
+		const messages = previous?.length ? previous.map(message => ({ ...message })) : this._historyMessages(history, participantId);
 		messages.push({ id: `${request.id}:user`, role: 'user', content: request.prompt, timestamp: Date.now() });
 		const snapshot: RemoteChatSessionSnapshot = {
 			sessionResource,
@@ -117,8 +117,8 @@ class RemoteChatState {
 			const value = Array.isArray(record?.value) ? record.value.join('\n') : record?.value;
 			const done = record?.metadata?.vscodeReasoningDone === true;
 			if (value || done) {
-				this._upsertThinking(sessionResource, requestId, record?.id || 'default', value || '', done);
-				this._emit({ type: 'chatThinkingDelta', sessionResource, requestId, delta: value, thinkingId: record?.id, done });
+				const delta = this._upsertThinking(sessionResource, requestId, record?.id || 'default', value || '', done);
+				if (delta || done) this._emit({ type: 'chatThinkingDelta', sessionResource, requestId, delta, thinkingId: record?.id, done });
 			}
 		} else if (part instanceof ChatToolInvocationPart || partName === 'ChatToolInvocationPart' || (record && typeof record.toolCallId === 'string' && typeof record.toolName === 'string')) {
 			const data = record?.toolSpecificData as ({ todoList?: Array<{ id: number; title: string; status: number }> } & Record<string, unknown>) | undefined;
@@ -185,8 +185,9 @@ class RemoteChatState {
 		} else if (part instanceof ChatResponseProgressPart || part instanceof ChatResponseProgressPart2 || partName === 'ChatResponseProgressPart' || partName === 'ChatResponseProgressPart2') {
 			const value = typeof record?.value === 'string' ? record.value : '';
 			if (value) {
-				this._upsertThinking(sessionResource, requestId, `progress:${value.slice(0, 40)}`, value, true);
-				this._emit({ type: 'chatThinkingDelta', sessionResource, requestId, delta: value, thinkingId: `progress:${value.slice(0, 40)}`, done: true });
+				const thinkingId = `progress:${value.slice(0, 40)}`;
+				const delta = this._upsertThinking(sessionResource, requestId, thinkingId, value, true);
+				this._emit({ type: 'chatThinkingDelta', sessionResource, requestId, delta, thinkingId, done: true });
 			}
 		}
 	}
@@ -214,19 +215,22 @@ class RemoteChatState {
 		return /ENOENT[^\n]*o200k_base\.tiktoken|github\.copilot-chat-[^\s\\/]+[\\/]dist[\\/]o200k_base\.tiktoken/i.test(value);
 	}
 
-	private _upsertThinking(sessionResource: string, requestId: string, thinkingId: string, value: string, done: boolean): void {
+	private _upsertThinking(sessionResource: string, requestId: string, thinkingId: string, value: string, done: boolean): string {
 		const snapshot = this._sessions.get(sessionResource);
 		const messages = snapshot?.messages.slice() ?? [];
 		const id = `${requestId}:thinking:${thinkingId}`;
 		const index = messages.findIndex(message => message.id === id);
 		const existing = index >= 0 ? messages[index] : undefined;
+		const previous = existing?.content || '';
+		const content = !value || previous.endsWith(value) ? previous : value.startsWith(previous) ? value : previous + value;
 		const thinking = {
-			id, role: 'assistant' as const, content: (existing?.content || '') + value,
+			id, role: 'assistant' as const, content,
 			timestamp: existing?.timestamp || Date.now(), kind: 'thinking' as const,
 			toolName: '思考过程', toolStatus: done ? 'completed' as const : 'running' as const,
 		};
 		if (index >= 0) messages[index] = thinking; else messages.push(thinking);
 		this._update(sessionResource, { messages });
+		return content.startsWith(previous) ? content.slice(previous.length) : value;
 	}
 
 	usage(sessionResource: string, requestId: string, usage: vscode.ChatResultUsage, maxInputTokens: number): void {
@@ -246,6 +250,16 @@ class RemoteChatState {
 	}
 
 	finish(sessionResource: string, requestId: string, status: 'completed' | 'cancelled' | 'error', error?: string): void {
+		if (status === 'error' && error && !this._isInternalChatNoise(error)) {
+			const snapshot = this._sessions.get(sessionResource);
+			const messages = snapshot?.messages.slice() ?? [];
+			const id = `${requestId}:error`;
+			if (!messages.some(message => message.id === id || message.content.includes(error))) {
+				messages.push({ id, role: 'assistant', content: error, timestamp: Date.now(), kind: 'message' });
+				this._update(sessionResource, { messages });
+				this._emit({ type: 'chatDelta', sessionResource, requestId, messageId: id, delta: error });
+			}
+		}
 		this._update(sessionResource, { status });
 		this._emit(status === 'completed'
 			? { type: 'chatDone', sessionResource, requestId }
@@ -314,19 +328,23 @@ class RemoteChatState {
 		return value.replace(/[\\[\]]/g, '\\$&');
 	}
 
-	private _historyMessages(history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[]): RemoteChatSessionSnapshot['messages'] {
+	private _historyMessages(history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[], participantId: string): RemoteChatSessionSnapshot['messages'] {
 		const messages: RemoteChatSessionSnapshot['messages'] = [];
+		let lastTimestamp = Date.now();
 		for (let index = 0; index < history.length; index++) {
-			const turn = history[index] as unknown as { id?: string; prompt?: string; response?: readonly unknown[] };
+			const turn = history[index] as unknown as { id?: string; prompt?: string; response?: readonly unknown[]; participant?: string; timestamp?: number; result?: { errorDetails?: { message?: string } } };
+			if (turn.participant && turn.participant !== participantId) continue;
+			const timestamp = typeof turn.timestamp === 'number' && turn.timestamp >= 946684800000 ? turn.timestamp : lastTimestamp;
 			if (typeof turn.prompt === 'string' && turn.prompt.trim()) {
-				messages.push({ id: turn.id || `history:${index}:user`, role: 'user', content: turn.prompt, timestamp: index * 2 });
+				lastTimestamp = timestamp;
+				messages.push({ id: turn.id || `history:${index}:user`, role: 'user', content: turn.prompt, timestamp });
 			} else if (Array.isArray(turn.response)) {
 				const turnId = turn.id || `history:${index}`;
 				let content = '';
 				let segment = 0;
 				const flushContent = () => {
 					const text = content.trim();
-					if (text) messages.push({ id: `${turnId}:assistant:${segment++}`, role: 'assistant', content: text, timestamp: index * 2 + segment / 1000, kind: 'message' });
+					if (text) messages.push({ id: `${turnId}:assistant:${segment++}`, role: 'assistant', content: text, timestamp: timestamp + segment, kind: 'message' });
 					content = '';
 				};
 				for (let partIndex = 0; partIndex < turn.response.length; partIndex++) {
@@ -349,7 +367,7 @@ class RemoteChatState {
 					} else if (name === 'ChatResponseThinkingProgressPart' || name === 'ChatResponseProgressPart' || name === 'ChatResponseProgressPart2') {
 						flushContent();
 						const text = Array.isArray(value) ? value.join('\n') : String(value || '');
-						if (text) messages.push({ id: `${turnId}:thinking:${part.id || partIndex}`, role: 'assistant', content: text, timestamp: index * 2 + partIndex / 100, kind: 'thinking', toolName: '思考过程', toolStatus: 'completed' });
+						if (text) messages.push({ id: `${turnId}:thinking:${part.id || partIndex}`, role: 'assistant', content: text, timestamp: timestamp + partIndex, kind: 'thinking', toolName: '思考过程', toolStatus: 'completed' });
 					} else if (name === 'ChatToolInvocationPart' || (typeof part?.toolCallId === 'string' && typeof part?.toolName === 'string')) {
 						flushContent();
 						const data = part.toolSpecificData as Record<string, unknown> | undefined;
@@ -357,7 +375,7 @@ class RemoteChatState {
 						const message = typeof messageValue === 'string' ? messageValue : messageValue?.value;
 						messages.push({
 							id: `${turnId}:tool:${part.toolCallId || partIndex}`, role: 'assistant',
-							content: message || part.toolName || '工具调用', timestamp: index * 2 + partIndex / 100,
+							content: message || part.toolName || '工具调用', timestamp: timestamp + partIndex,
 							kind: 'tool', toolName: part.toolName || '工具调用',
 							toolStatus: part.isError ? 'error' : 'completed',
 							toolInput: this._toolText(data?.input ?? data?.partialInput ?? data?.commandLine),
@@ -368,6 +386,10 @@ class RemoteChatState {
 					}
 				}
 				flushContent();
+				const error = turn.result?.errorDetails?.message?.trim();
+				if (error && !messages.some(message => message.id.startsWith(`${turnId}:error:`) || message.content.includes(error))) {
+					messages.push({ id: `${turnId}:error:${segment}`, role: 'assistant', content: error, timestamp: timestamp + turn.response.length + 1, kind: 'message' });
+				}
 			}
 		}
 		return messages;

@@ -59,7 +59,8 @@ function buildConfigurationSchema(endpoint: IChatEndpoint): { configurationSchem
 		return {};
 	}
 
-	// Only enable effort picker for Claude and GPT models
+	// Keep Copilot Chat's native model-picker behavior unchanged. Remote clients
+	// discover additional provider capabilities through the bridge instead.
 	const family = endpoint.family.toLowerCase();
 	if (!family.startsWith('claude') && !family.startsWith('gpt-')) {
 		return {};

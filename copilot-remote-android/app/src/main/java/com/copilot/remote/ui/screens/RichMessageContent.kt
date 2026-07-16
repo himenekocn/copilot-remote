@@ -38,6 +38,7 @@ fun RichMessageContent(message: ChatMessage) {
 
 @Composable
 fun ProcessMessageGroup(messages: List<ChatMessage>) {
+    val darkMode = androidx.compose.foundation.isSystemInDarkTheme()
     val toolMessages = messages.filter { it.kind == "tool" }
     val hasThinking = messages.any { it.kind == "thinking" }
     val failed = toolMessages.count { it.toolStatus == "error" }
@@ -51,8 +52,8 @@ fun ProcessMessageGroup(messages: List<ChatMessage>) {
     }.joinToString(" · ")
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
+        shape = RoundedCornerShape(16.dp),
+        color = if (darkMode) Color(0xFF181E25) else Color(0xFFE9EFF6),
     ) {
         Column {
             Row(
@@ -94,11 +95,12 @@ fun ProcessMessageGroup(messages: List<ChatMessage>) {
 
 @Composable
 private fun ThinkingBlock(message: ChatMessage) {
+    val darkMode = androidx.compose.foundation.isSystemInDarkTheme()
     var expanded by remember(message.id) { mutableStateOf(message.isStreaming) }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = MiuixTheme.colorScheme.surfaceContainer,
+        color = if (darkMode) Color(0xFF202936) else Color(0xFFE3ECF8),
     ) {
         Column {
             Row(
@@ -122,6 +124,7 @@ private fun ThinkingBlock(message: ChatMessage) {
 
 @Composable
 private fun ToolCallBlock(message: ChatMessage) {
+    val darkMode = androidx.compose.foundation.isSystemInDarkTheme()
     var expanded by remember(message.id) { mutableStateOf(message.toolStatus == "error") }
     val statusText = when (message.toolStatus) {
         "completed" -> "已完成"
@@ -136,7 +139,7 @@ private fun ToolCallBlock(message: ChatMessage) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = MiuixTheme.colorScheme.surfaceContainer,
+        color = if (darkMode) Color(0xFF20252B) else Color(0xFFF7F9FC),
     ) {
         Column {
             Row(
@@ -270,6 +273,8 @@ private fun markdownTableCells(line: String): List<String> = line.trim().trim('|
 @Composable
 private fun CodeBlock(language: String, code: String) {
     val clipboard = LocalClipboardManager.current
+	val codeScrollState = androidx.compose.foundation.rememberScrollState()
+	val visibleCode = code.ifBlank { "（代码内容为空）" }
     Surface(shape = RoundedCornerShape(12.dp), color = MiuixTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -278,14 +283,19 @@ private fun CodeBlock(language: String, code: String) {
                     Icon(Icons.Default.ContentCopy, "复制代码", Modifier.size(18.dp))
                 }
             }
-            SelectionContainer {
-                Text(
-                    syntaxHighlight(code),
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    fontFamily = FontFamily.Monospace,
-                    style = MiuixTheme.textStyles.body2,
-                )
-            }
+			Box(
+				Modifier.fillMaxWidth().horizontalScroll(codeScrollState)
+					.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+			) {
+				SelectionContainer {
+					Text(
+						syntaxHighlight(visibleCode),
+						fontFamily = FontFamily.Monospace,
+						style = MiuixTheme.textStyles.body2,
+						softWrap = false,
+					)
+				}
+			}
         }
     }
 }
@@ -297,7 +307,15 @@ private fun splitMarkdown(markdown: String): List<MarkdownSegment> {
     val code = StringBuilder()
     var language: String? = null
     fun flushText() { if (text.isNotEmpty()) { result += MarkdownSegment(text.toString().trimEnd()); text.clear() } }
-    fun flushCode() { result += MarkdownSegment(code.toString().trimEnd(), language.orEmpty()); code.clear(); language = null }
+	fun flushCode() {
+		val content = code.toString().trimEnd()
+		// VS Code serializes codeblockUri/textEditGroup pairs with an empty fenced
+		// markdown marker. The actual edit is rendered separately as a tool result;
+		// showing that marker creates a blank "code" card on Android.
+		if (content.isNotBlank()) result += MarkdownSegment(content, language.orEmpty())
+		code.clear()
+		language = null
+	}
     for (line in markdown.lines()) {
         if (line.trimStart().startsWith("```")) {
             if (language == null) {

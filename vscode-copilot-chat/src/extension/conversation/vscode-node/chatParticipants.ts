@@ -225,7 +225,7 @@ Learn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-c
 						: request.tools,
 				});
 			}
-			remoteChatState.start(request, context.history);
+			remoteChatState.start(request, context.history, id);
 			try {
 				// If we need to switch to the base model, this function will handle it
 				// Otherwise it just returns the same request passed into it
@@ -294,7 +294,8 @@ Learn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-c
 					}
 				}
 
-				remoteChatState.finish(sessionResource, request.id, 'completed');
+				const remoteError = result.errorDetails?.message;
+				remoteChatState.finish(sessionResource, request.id, remoteError ? 'error' : 'completed', remoteError);
 				return result;
 			} catch (error) {
 				remoteChatState.finish(sessionResource, request.id, token.isCancellationRequested ? 'cancelled' : 'error', error instanceof Error ? error.message : String(error));
