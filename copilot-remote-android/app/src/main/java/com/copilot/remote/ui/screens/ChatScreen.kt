@@ -3,6 +3,7 @@ package com.copilot.remote.ui.screens
 import android.net.Uri
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.animation.AnimatedVisibility
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.copilot.remote.data.ChatAttachment
 import com.copilot.remote.data.ChatMessage
+import com.copilot.remote.data.ChatTodoItem
 import com.copilot.remote.data.ModelInfo
 import com.copilot.remote.data.effectiveReasoningEfforts
 import com.copilot.remote.viewmodel.CopilotViewModel
@@ -52,6 +54,7 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val listState = rememberLazyListState()
+    val timeline = remember(state.chatMessages) { buildChatTimeline(state.chatMessages) }
     var input by remember { mutableStateOf("") }
     var attachments by remember { mutableStateOf<List<ChatAttachment>>(emptyList()) }
     var showModels by remember { mutableStateOf(false) }
@@ -77,7 +80,13 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
     LaunchedEffect(state.pendingCaptureAttachment) { state.pendingCaptureAttachment?.let { attachments = attachments + it; viewModel.consumeCaptureAttachment() } }
     LaunchedEffect(state.pendingTerminalAttachment) { state.pendingTerminalAttachment?.let { attachments = attachments + it; viewModel.consumeTerminalAttachment() } }
     LaunchedEffect(Unit) { viewModel.refreshSlashCommands() }
-    LaunchedEffect(state.chatMessages.size, state.chatMessages.lastOrNull()?.content?.length) { if (state.chatMessages.isNotEmpty()) listState.animateScrollToItem(state.chatMessages.lastIndex) }
+    LaunchedEffect(timeline.size, state.chatMessages.lastOrNull()?.content?.length, state.chatTodos) {
+        if (timeline.isNotEmpty() || state.chatTodos.isNotEmpty()) {
+            withFrameNanos { }
+            val lastItem = listState.layoutInfo.totalItemsCount - 1
+            if (lastItem >= 0) listState.animateScrollToItem(lastItem)
+        }
+    }
     val send = {
         if (input.isNotBlank() || attachments.isNotEmpty()) {
             viewModel.sendMessage(input, attachments)
@@ -133,8 +142,18 @@ fun ChatScreen(viewModel: CopilotViewModel, onOpenNavigation: () -> Unit = {}) {
                     Text("正在读取会话记录…", color = MiuixTheme.colorScheme.onSurfaceSecondary)
                 }
             } else if (state.chatMessages.isEmpty()) item { EmptyConversation() }
-            items(state.chatMessages, key = { it.id }) { message ->
-                MessageCard(message, { viewModel.retryMessage(message.id) }) { previewAttachment = it }
+            items(timeline, key = { it.id }) { entry ->
+                if (entry.isProcess) {
+                    ProcessMessageGroup(entry.messages)
+                } else {
+                    val message = entry.messages.first()
+                    MessageCard(message, { viewModel.retryMessage(message.id) }) { previewAttachment = it }
+                }
+            }
+            if (state.chatTodos.isNotEmpty()) {
+                item(key = "active-todos") {
+                    TodoProgressCard(state.chatTodos, state.isSending)
+                }
             }
         }
         if (attachments.isNotEmpty()) LazyRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -403,12 +422,99 @@ private fun permissionLabel(level: String) = when (level) {
     else -> "默认权限"
 }
 
+private data class ChatTimelineEntry(
+    val id: String,
+    val messages: List<ChatMessage>,
+    val isProcess: Boolean,
+)
+
+private fun buildChatTimeline(messages: List<ChatMessage>): List<ChatTimelineEntry> {
+    val result = mutableListOf<ChatTimelineEntry>()
+    val process = mutableListOf<ChatMessage>()
+    fun flushProcess() {
+        if (process.isEmpty()) return
+        result += ChatTimelineEntry("process:${process.first().id}", process.toList(), true)
+        process.clear()
+    }
+    messages.forEach { message ->
+        if (message.kind == "tool" || message.kind == "thinking") {
+            process += message
+        } else {
+            flushProcess()
+            result += ChatTimelineEntry(message.id, listOf(message), false)
+        }
+    }
+    flushProcess()
+    return result
+}
+
+@Composable
+private fun TodoProgressCard(items: List<ChatTodoItem>, isRunning: Boolean) {
+    val completed = items.count { it.status == "completed" }
+    val active = items.indexOfFirst { it.status == "in-progress" }
+    var expanded by remember(items.firstOrNull()?.id) { mutableStateOf(isRunning || completed < items.size) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MiuixTheme.colorScheme.surfaceContainer,
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Checklist, "待办事项", Modifier.size(21.dp), tint = MiuixTheme.colorScheme.primary)
+                Spacer(Modifier.width(9.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("待办事项", fontWeight = FontWeight.SemiBold)
+                    Text("$completed / ${items.size} 已完成", style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                }
+                if (isRunning && completed < items.size) InfiniteProgressIndicator(Modifier.width(42.dp))
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "收起待办" else "展开待办", Modifier.size(21.dp))
+            }
+            LinearProgressIndicator(
+                progress = if (items.isEmpty()) 0f else completed.toFloat() / items.size,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            )
+            AnimatedVisibility(expanded) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    items.forEachIndexed { index, item ->
+                        val inProgress = item.status == "in-progress" || (item.status == "not-started" && active < 0 && isRunning && index == completed)
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                when {
+                                    item.status == "completed" -> Icons.Default.CheckCircle
+                                    inProgress -> Icons.Default.PlayCircle
+                                    else -> Icons.Default.RadioButtonUnchecked
+                                },
+                                null,
+                                Modifier.padding(top = 1.dp).size(19.dp),
+                                tint = if (item.status == "completed" || inProgress) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceSecondary,
+                            )
+                            Spacer(Modifier.width(9.dp))
+                            Text(
+                                item.title,
+                                modifier = Modifier.weight(1f),
+                                style = MiuixTheme.textStyles.body2,
+                                color = if (item.status == "completed") MiuixTheme.colorScheme.onSurfaceSecondary else MiuixTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAttachment: (ChatAttachment) -> Unit) {
     val user = message.role == "user"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         if (user) {
-            Card(modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(.86f), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)) {
+            Card(modifier = Modifier.widthIn(max = 680.dp).wrapContentWidth(), cornerRadius = 18.dp, insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp), colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)) {
                 MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else if (message.kind == "tool" || message.kind == "thinking") {
@@ -416,12 +522,8 @@ private fun MessageCard(message: ChatMessage, onRetry: () -> Unit, onPreviewAtta
                 MessageContent(message, onRetry, onPreviewAttachment)
             }
         } else {
-            Row(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp), verticalAlignment = Alignment.Top) {
-                Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MiuixTheme.colorScheme.surfaceContainer, modifier = Modifier.size(30.dp)) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(17.dp), tint = MiuixTheme.colorScheme.primary) }
-                }
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f).padding(top = 4.dp)) { MessageContent(message, onRetry, onPreviewAttachment) }
+            Box(Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp)) {
+                MessageContent(message, onRetry, onPreviewAttachment)
             }
         }
     }

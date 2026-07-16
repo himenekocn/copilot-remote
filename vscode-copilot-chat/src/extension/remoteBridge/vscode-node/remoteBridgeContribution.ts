@@ -911,7 +911,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 		const lines = value.split(/\r?\n/);
 		for (let index = 0; index < lines.length; index++) {
 			const line = lines[index];
-			const match = line.match(/^\s*(?:[-*]\s*)?\[([ xX~>])\]\s*(.+)$/)
+			const match = line.match(/^\s*(?:[-*]\s*)?\[([ xX~>\-])\]\s*(.+)$/)
 				?? line.match(/^\s*(?:[-*]|\d+[.)])\s*(?:\[)?(not-started|in-progress|completed|pending|active|done)(?:\])?\s*[:|-]\s*(.+)$/i);
 			if (!match) continue;
 			const marker = match[1].toLowerCase();
@@ -920,7 +920,7 @@ export class RemoteBridgeContribution extends Disposable implements IExtensionCo
 				title: match[2].trim(),
 				status: marker === 'x' || marker === 'completed' || marker === 'done'
 					? 'completed'
-					: marker === '~' || marker === '>' || marker === 'in-progress' || marker === 'active'
+					: marker === '~' || marker === '>' || marker === '-' || marker === 'in-progress' || marker === 'active'
 						? 'in-progress'
 						: 'not-started',
 			});
